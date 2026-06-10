@@ -3,3 +3,7 @@
 # 不会把项目识别为 Python runtime，会导致 api/*.py 不被当作 Function。
 # 写一个最小可解析的占位依赖触发 Python runtime 检测。
 urllib3
+aiohttp>=3.9.0
+
+# 宝塔服务器部署（domain_server.py）需要 aiohttp
+# pip install aiohttp
