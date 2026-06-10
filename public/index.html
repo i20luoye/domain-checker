@@ -462,7 +462,7 @@ td:first-child{color:#475569;font-size:12px}
     </div>
     <div class="field">
       <label for="inputBatchSize">每批数量</label>
-      <input type="number" id="inputBatchSize" value="10" min="5" max="20">
+      <input type="number" id="inputBatchSize" value="50" min="5" max="500">
     </div>
     <div class="preview-label" id="previewLabel">
       <span>📊</span> 组合: <strong id="previewText">ai + 3位字母 = 17,576 个 × 2 后缀 = 35,152 次查询</strong>
@@ -821,7 +821,7 @@ async function startCheck(){
   const suffix = $('inputSuffix').value.trim().toLowerCase();
   const letters = getAvailableLetters();
   const tlds = getActiveTlds();
-  batchSize = Math.max(5,Math.min(20,parseInt($('inputBatchSize').value)||10));
+  batchSize = Math.max(5,Math.min(500,parseInt($('inputBatchSize').value)||50));
   concurrent = Math.max(1,Math.min(8,parseInt($('inputConcurrent').value)||3));
 
   if(!tlds.length){alert('请至少选择一个 TLD');return;}

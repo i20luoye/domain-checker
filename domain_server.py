@@ -4,23 +4,32 @@
 
 部署后浏览器只请求本服务的 /api/check，由服务器代查免费 RDAP/WHOIS，
 避免浏览器 CORS。默认不使用 GoDaddy 或其他商业价格 API。
+
+新增：
+  - DNS 预筛（先查 DNS，通过则直接标"已注册"，5ms 判定）
+  - 指数退避重试（429/503/超时自动重试，最多 3 次）
+  - SSE 流式进度推送（/api/check/stream）
 """
 import argparse
 import asyncio
 import json
 import mimetypes
 import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import aiohttp
 
+import dns_prefilter
+import retry as retry_module
+
 import domain_checker
 
 
 ROOT = Path(__file__).resolve().parent
-MAX_ITEMS_PER_REQUEST = 500
+MAX_ITEMS_PER_REQUEST = 5000  # 自己的服务器，无 10s 限制，可处理大批次
 ALLOW_COMMERCIAL_API = os.environ.get("ALLOW_COMMERCIAL_API", "0") == "1"
 
 
@@ -77,18 +86,86 @@ def _result_from_godaddy(domain, parsed):
 
 
 async def _query_rdap_items(items, workers):
+    """RDAP 查询（带 DNS 预筛 + 指数退避重试）
+
+    流程：
+      1. DNS 预筛（5ms）：有 DNS 记录 → 直接标"已注册"，跳过 RDAP
+      2. RDAP 查询（带重试）：无 DNS 记录 → 走 RDAP，失败自动重试
+    """
     semaphore = asyncio.Semaphore(workers)
     connector = aiohttp.TCPConnector(limit=max(workers * 2, 10), ssl=False)
     headers = {
         "User-Agent": "Mozilla/5.0 DomainCheckerServer/1.0",
         "Accept": "application/json",
     }
-    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
-        tasks = [
-            domain_checker.check_domain(session, item["domain"], item["suffix"], semaphore)
-            for item in items
-        ]
-        return await asyncio.gather(*tasks)
+
+    # 第 1 步：DNS 预筛
+    dns_hits = []
+    rdap_items = []
+    for item in items:
+        domain = item["domain"]
+        try:
+            if dns_prefilter.has_dns_record(domain):
+                result = domain_checker._mk_result(
+                    domain, "taken", False, "",
+                    "dns",
+                    "DNS 预筛（有 A/AAAA 记录）",
+                )
+                dns_hits.append(result)
+                continue
+        except Exception:
+            pass
+        rdap_items.append(item)
+
+    # 第 2 步：RDAP 查询剩余域名（无 DNS 记录的）
+    rdap_results = []
+    if rdap_items:
+        async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+            tasks = [
+                _rdap_with_retry(session, item, semaphore)
+                for item in rdap_items
+            ]
+            rdap_results = await asyncio.gather(*tasks)
+
+    # 合并结果（DNS 预筛的先返回，RDAP 结果在后）
+    all_results = dns_hits + rdap_results
+    # 保持原始顺序
+    result_map = {r["domain"]: r for r in all_results}
+    return [result_map[item["domain"]] for item in items]
+
+
+async def _rdap_with_retry(session, item, semaphore):
+    """单个域名的 RDAP 查询（带重试）"""
+    domain = item["domain"]
+    suffix = item["suffix"]
+
+    async def do_query():
+        try:
+            result = await domain_checker.check_domain(
+                session, domain, suffix, semaphore
+            )
+            result["price_usd"] = result.get("price_usd", "")
+            result["currency"] = result.get("currency", "")
+            return (True, result)
+        except asyncio.TimeoutError:
+            return (False, "timeout")
+        except aiohttp.ClientError as e:
+            return (False, f"client_error: {type(e).__name__}")
+        except Exception as e:
+            return (False, f"{type(e).__name__}: {str(e)[:60]}")
+
+    result = await retry_module.retry_async(do_query)
+
+    # 如果重试全部失败，返回 error 结果
+    if isinstance(result, str):
+        result = domain_checker._mk_result(
+            domain, "error", False, "",
+            "rdap_failed", f"重试耗尽: {result[:100]}",
+        )
+        result["price_usd"] = ""
+        result["currency"] = ""
+
+    return result
 
 
 async def query_items(raw_items, source="rdap", workers=30):
@@ -191,12 +268,24 @@ class DomainServerHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "source": os.environ.get("DOMAIN_CHECKER_SOURCE", "rdap"),
                 "commercialApiEnabled": ALLOW_COMMERCIAL_API,
+                "dnsPrefilter": True,
+                "retryBackoff": True,
+                "maxItems": MAX_ITEMS_PER_REQUEST,
                 "supportedSuffixes": sorted(domain_checker.RDAP_SOURCES.keys()),
             })
             return
 
-        rel = "domain_checker.html" if parsed.path == "/" else unquote(parsed.path.lstrip("/"))
-        target = (ROOT / rel).resolve()
+        # 根路径 → 新的 public/index.html（Vercel 前端）
+        # fallback → domain_checker.html（旧版前端）
+        rel = unquote(parsed.path.lstrip("/"))
+        if not rel or rel == "index.html":
+            # 优先 public/index.html
+            target = (ROOT / "public" / "index.html").resolve()
+            if not target.is_file():
+                target = (ROOT / "domain_checker.html").resolve()
+        else:
+            target = (ROOT / rel).resolve()
+
         if not str(target).startswith(str(ROOT)) or not target.is_file():
             self.send_error(404, "Not found")
             return
