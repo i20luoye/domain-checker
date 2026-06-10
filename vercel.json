@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/*.py": {
+      "maxDuration": 10,
+      "memory": 256
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache" }
+      ]
+    }
+  ]
+}

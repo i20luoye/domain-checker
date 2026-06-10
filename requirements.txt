@@ -1,0 +1,5 @@
+# No external dependencies needed
+# All modules used are Python built-ins:
+# - urllib.request (RDAP HTTP queries)
+# - socket (whois TCP port 43)
+# - json, ssl, concurrent.futures

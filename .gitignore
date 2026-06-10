@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# 临时 / 测试文件
+_*.txt
+*.tmp
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 缓存
+iana_bootstrap_cache.json
+.cache/
+*.log
+
+# 敏感（万一以后有 key）
+.env
+.env.local
+*.pem
+*.key

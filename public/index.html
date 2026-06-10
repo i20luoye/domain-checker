@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>域名批量查询工具 - 免费在线批量检测域名可用性</title>
+<meta name="description" content="免费在线域名批量查询工具，支持 RDAP + Whois 多源查询，批量检测域名可用性，无需 API Key，快速高效。">
+<meta name="keywords" content="域名查询,批量查询,域名可用性,RDAP,Whois,域名注册">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  font-size:14px;
+  color:#f1f5f9;
+  background:linear-gradient(135deg,#0a0f1e 0%,#111827 50%,#0a0f1e 100%);
+  min-height:100vh;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+/* Animated background orbs */
+body::before,body::after{
+  content:'';position:fixed;border-radius:50%;pointer-events:none;
+  filter:blur(120px);opacity:.12;z-index:0;
+}
+body::before{
+  width:600px;height:600px;
+  background:radial-gradient(circle,#7c3aed,transparent 70%);
+  top:-200px;right:-100px;
+  animation:orbFloat 20s ease-in-out infinite alternate;
+}
+body::after{
+  width:500px;height:500px;
+  background:radial-gradient(circle,#06b6d4,transparent 70%);
+  bottom:-150px;left:-80px;
+  animation:orbFloat 25s ease-in-out infinite alternate-reverse;
+}
+@keyframes orbFloat{0%{transform:translate(0,0)}100%{transform:translate(60px,80px)}}
+
+/* ── Utility ──────────────────────────────────────────────── */
+.container{max-width:1200px;margin:0 auto;padding:0 20px;position:relative;z-index:1}
+.mono{font-family:'JetBrains Mono','Fira Code',monospace}
+
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:rgba(15,23,42,.4)}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.25);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.4)}
+
+/* ── Glass Card ───────────────────────────────────────────── */
+.glass{
+  background:rgba(30,41,59,.7);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(148,163,184,.1);
+  border-radius:16px;
+  transition:border-color .3s,box-shadow .3s,transform .3s;
+}
+.glass:hover{border-color:rgba(148,163,184,.18);box-shadow:0 8px 32px rgba(0,0,0,.25)}
+
+/* ── Header ───────────────────────────────────────────────── */
+.header{text-align:center;padding:56px 0 32px}
+.header h1{
+  font-size:clamp(1.8rem,5vw,2.8rem);font-weight:800;
+  background:linear-gradient(135deg,#7c3aed,#3b82f6,#06b6d4,#7c3aed);
+  background-size:300% 300%;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  animation:gradientShimmer 4s ease-in-out infinite;
+  letter-spacing:-.02em;
+}
+.header p{color:#94a3b8;font-size:15px;margin-top:8px;letter-spacing:.5px}
+.header p span{
+  display:inline-block;margin:0 6px;color:#64748b;
+}
+@keyframes gradientShimmer{
+  0%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+  100%{background-position:0% 50%}
+}
+
+/* ── Inputs & Controls ────────────────────────────────────── */
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:12px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px}
+.field input,.field select{
+  background:rgba(15,23,42,.6);
+  border:1px solid rgba(148,163,184,.15);
+  border-radius:10px;color:#f1f5f9;
+  padding:10px 14px;font-size:14px;font-family:inherit;
+  transition:border-color .25s,box-shadow .25s;
+  outline:none;
+}
+.field input:focus,.field select:focus{
+  border-color:rgba(124,58,237,.5);
+  box-shadow:0 0 0 3px rgba(124,58,237,.15);
+}
+.field input::placeholder{color:#475569}
+.field select option{background:#1e293b;color:#f1f5f9}
+
+/* ── Config Card ──────────────────────────────────────────── */
+.config-card{padding:28px;margin-bottom:24px}
+.config-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;align-items:flex-end}
+.config-row:last-child{margin-bottom:0}
+.config-row .field{flex:1;min-width:140px}
+
+/* TLD Pills */
+.tld-group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tld-pill{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:8px 18px;border-radius:9999px;font-size:13px;font-weight:600;
+  cursor:pointer;user-select:none;
+  background:rgba(15,23,42,.5);
+  border:1px solid rgba(148,163,184,.12);
+  color:#94a3b8;
+  transition:all .25s;
+}
+.tld-pill:hover{border-color:rgba(124,58,237,.4);color:#c4b5fd}
+.tld-pill.active{
+  background:linear-gradient(135deg,rgba(124,58,237,.25),rgba(59,130,246,.2));
+  border-color:rgba(124,58,237,.5);
+  color:#e0e7ff;
+  box-shadow:0 0 12px rgba(124,58,237,.15);
+}
+
+/* Preview label */
+.preview-label{
+  font-size:13px;color:#94a3b8;
+  padding:10px 16px;border-radius:10px;
+  background:rgba(15,23,42,.4);
+  border:1px dashed rgba(148,163,184,.12);
+  flex:2;min-width:280px;
+  display:flex;align-items:center;gap:8px;
+}
+.preview-label strong{color:#7dd3fc;font-weight:600}
+
+/* Buttons */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;
+  cursor:pointer;border:none;color:#fff;
+  transition:all .25s;user-select:none;
+  position:relative;overflow:hidden;
+  font-family:inherit;
+}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
+.btn::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(rgba(255,255,255,.1),transparent);
+  opacity:0;transition:opacity .25s;
+}
+.btn:hover:not(:disabled)::after{opacity:1}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 20px rgba(0,0,0,.3)}
+
+.btn-primary{background:linear-gradient(135deg,#7c3aed,#3b82f6);box-shadow:0 2px 12px rgba(124,58,237,.3)}
+.btn-primary:hover:not(:disabled){box-shadow:0 4px 24px rgba(124,58,237,.4)}
+.btn-amber{background:linear-gradient(135deg,#d97706,#f59e0b)}
+.btn-red{background:linear-gradient(135deg,#dc2626,#f43f5e)}
+.btn-indigo{background:linear-gradient(135deg,#6366f1,#818cf8)}
+.btn-green{background:linear-gradient(135deg,#059669,#10b981)}
+.btn-purple{background:linear-gradient(135deg,#7c3aed,#a855f7)}
+.btn-sm{padding:8px 16px;font-size:13px;border-radius:9px}
+
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+/* API status indicator */
+.api-status{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:9999px;font-size:12px;font-weight:600;
+  cursor:pointer;user-select:none;transition:all .25s;
+}
+.api-status::before{
+  content:'';width:8px;height:8px;border-radius:50%;
+  animation:statusPulse 1.5s ease-in-out infinite;
+}
+.api-status-loading{background:rgba(148,163,184,.1);color:#94a3b8;border:1px solid rgba(148,163,184,.18)}
+.api-status-loading::before{background:#94a3b8}
+.api-status-ok{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.25)}
+.api-status-ok::before{background:#10b981;animation:none}
+.api-status-error{background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.25)}
+.api-status-error::before{background:#f87171;animation:none}
+@keyframes statusPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.1)}}
+
+/* Hide helper */
+.hidden{display:none!important}
+
+/* ── Stats Grid ───────────────────────────────────────────── */
+.stats-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:16px;margin-bottom:24px;
+}
+.stat-card{
+  padding:22px 18px;text-align:center;
+  position:relative;overflow:hidden;
+}
+.stat-card::before{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:50%;height:2px;border-radius:0 0 4px 4px;
+}
+.stat-card.blue::before{background:linear-gradient(90deg,#3b82f6,#06b6d4)}
+.stat-card.green::before{background:#10b981}
+.stat-card.purple::before{background:#a855f7}
+.stat-card.red::before{background:#f43f5e}
+.stat-card.amber::before{background:#f59e0b}
+.stat-card.cyan::before{background:#06b6d4}
+
+.stat-number{
+  font-size:32px;font-weight:800;letter-spacing:-.02em;
+  margin-bottom:4px;transition:color .3s;
+}
+.stat-card.blue .stat-number{background:linear-gradient(135deg,#3b82f6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.stat-card.green .stat-number{color:#10b981}
+.stat-card.purple .stat-number{color:#a855f7}
+.stat-card.red .stat-number{color:#f43f5e}
+.stat-card.amber .stat-number{color:#f59e0b}
+.stat-card.cyan .stat-number{color:#06b6d4}
+
+.stat-label{font-size:12px;color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.5px}
+.stat-unit{font-size:11px;color:#475569;margin-left:2px}
+
+@keyframes pulse{
+  0%,100%{opacity:1}50%{opacity:.6}
+}
+.pulsing .stat-number{animation:pulse 1.5s ease-in-out infinite}
+
+/* ── Progress Bar ─────────────────────────────────────────── */
+.progress-wrap{padding:16px 24px;margin-bottom:24px;display:flex;align-items:center;gap:16px}
+.progress-bar-outer{
+  flex:1;height:10px;border-radius:999px;
+  background:rgba(15,23,42,.6);
+  overflow:hidden;position:relative;
+}
+.progress-bar-inner{
+  height:100%;border-radius:999px;
+  background:linear-gradient(90deg,#7c3aed,#3b82f6,#06b6d4);
+  background-size:200% 100%;
+  animation:progressFlow 2s linear infinite;
+  transition:width .4s ease;
+  width:0%;
+}
+@keyframes progressFlow{0%{background-position:200% 0}100%{background-position:0 0}}
+.progress-text{font-size:13px;font-weight:600;color:#94a3b8;white-space:nowrap;min-width:56px}
+.progress-eta{font-size:12px;color:#64748b;white-space:nowrap;min-width:120px;text-align:right}
+
+/* ── Results Card ─────────────────────────────────────────── */
+.results-card{padding:24px;margin-bottom:40px}
+.results-header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px}
+.filter-pills{display:flex;gap:6px;flex-wrap:wrap}
+.filter-pill{
+  padding:6px 14px;border-radius:9999px;font-size:12px;font-weight:600;
+  cursor:pointer;user-select:none;
+  background:rgba(15,23,42,.5);
+  border:1px solid rgba(148,163,184,.1);
+  color:#64748b;transition:all .25s;
+}
+.filter-pill:hover{color:#94a3b8;border-color:rgba(148,163,184,.2)}
+.filter-pill.active{
+  background:rgba(124,58,237,.15);border-color:rgba(124,58,237,.4);color:#c4b5fd;
+}
+.search-box{
+  position:relative;margin-left:auto;
+}
+.search-box input{
+  background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.12);
+  border-radius:9999px;color:#f1f5f9;padding:7px 14px 7px 34px;
+  font-size:13px;width:200px;outline:none;transition:border-color .25s,width .25s;
+  font-family:inherit;
+}
+.search-box input:focus{border-color:rgba(124,58,237,.4);width:260px}
+.search-box::before{
+  content:'⌕';position:absolute;left:12px;top:50%;transform:translateY(-50%);
+  color:#64748b;font-size:14px;pointer-events:none;
+}
+.result-count{font-size:12px;color:#64748b;white-space:nowrap}
+
+/* Alpha nav */
+.alpha-nav{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px}
+.alpha-btn{
+  width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;
+  background:rgba(15,23,42,.4);border:1px solid rgba(148,163,184,.08);
+  color:#64748b;transition:all .2s;text-transform:uppercase;
+}
+.alpha-btn:hover,.alpha-btn.active{
+  background:rgba(124,58,237,.15);border-color:rgba(124,58,237,.35);color:#c4b5fd;
+}
+
+/* Table */
+.results-table-wrap{max-height:600px;overflow-y:auto;border-radius:12px;border:1px solid rgba(148,163,184,.06)}
+table{width:100%;border-collapse:collapse}
+thead{position:sticky;top:0;z-index:2}
+thead th{
+  background:rgba(15,23,42,.85);backdrop-filter:blur(8px);
+  padding:12px 14px;font-size:11px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:#64748b;text-align:left;
+  border-bottom:1px solid rgba(148,163,184,.08);
+}
+tbody tr{
+  border-bottom:1px solid rgba(148,163,184,.04);
+  transition:background .2s;
+  animation:fadeRow .35s ease;
+}
+tbody tr:hover{background:rgba(148,163,184,.04)}
+@keyframes fadeRow{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+td{padding:10px 14px;font-size:13px;color:#cbd5e1;vertical-align:middle}
+td:first-child{color:#475569;font-size:12px}
+.domain-cell{font-family:'JetBrains Mono','Fira Code',monospace;font-weight:500;color:#f1f5f9;font-size:13px}
+.tld-cell{color:#94a3b8;font-size:12px}
+
+/* Badges */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 10px;border-radius:9999px;font-size:11px;font-weight:700;
+  letter-spacing:.3px;
+}
+.badge-available{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.2)}
+.badge-taken{background:rgba(244,63,94,.1);color:#fb7185;border:1px solid rgba(244,63,94,.15)}
+.badge-error{background:rgba(245,158,11,.1);color:#fbbf24;border:1px solid rgba(245,158,11,.15)}
+.badge-premium{background:rgba(168,85,247,.12);color:#c084fc;border:1px solid rgba(168,85,247,.2)}
+
+.method-tag{font-size:11px;color:#64748b;background:rgba(100,116,139,.1);padding:2px 8px;border-radius:6px}
+.method-tag.whois{color:#fbbf24;background:rgba(245,158,11,.08)}
+
+/* Confidence */
+.confidence{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600}
+.conf-VERY_HIGH{color:#10b981;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2)}
+.conf-HIGH{color:#06b6d4;background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.18)}
+.conf-MEDIUM{color:#fbbf24;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.18)}
+.conf-LOW{color:#f87171;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.18)}
+.conf-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.conf-VERY_HIGH .conf-dot{background:#10b981}
+.conf-HIGH .conf-dot{background:#06b6d4}
+.conf-MEDIUM .conf-dot{background:#fbbf24}
+.conf-LOW .conf-dot{background:#f87171}
+
+/* Action links */
+.action-links{display:flex;gap:8px}
+.action-link{
+  font-size:11px;color:#7dd3fc;text-decoration:none;
+  padding:3px 8px;border-radius:6px;
+  background:rgba(125,211,252,.06);
+  border:1px solid rgba(125,211,252,.1);
+  transition:all .2s;white-space:nowrap;
+}
+.action-link:hover{background:rgba(125,211,252,.12);border-color:rgba(125,211,252,.25);color:#bae6fd}
+
+.table-footer{text-align:center;padding:14px;color:#475569;font-size:12px}
+
+/* Empty state */
+.empty-state{
+  text-align:center;padding:60px 20px;color:#475569;
+}
+.empty-state .icon{font-size:48px;margin-bottom:12px;opacity:.5}
+.empty-state p{font-size:14px}
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media(max-width:768px){
+  .container{padding:0 12px}
+  .header{padding:36px 0 20px}
+  .config-card{padding:18px}
+  .config-row{gap:10px}
+  .config-row .field{min-width:100%;flex-basis:100%}
+  .stats-grid{grid-template-columns:repeat(3,1fr);gap:10px}
+  .stat-card{padding:16px 10px}
+  .stat-number{font-size:24px}
+  .progress-wrap{flex-wrap:wrap;gap:8px;padding:14px 16px}
+  .progress-text,.progress-eta{font-size:12px}
+  .results-card{padding:16px}
+  .search-box input{width:140px}
+  .search-box input:focus{width:180px}
+  .results-table-wrap{max-height:400px}
+  .btn{padding:10px 16px;font-size:13px}
+  .alpha-nav{gap:3px}
+  .alpha-btn{width:24px;height:24px;font-size:10px}
+  td,thead th{padding:8px 10px;font-size:12px}
+}
+@media(max-width:480px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .btn-row{flex-direction:column}
+  .btn-row .btn{width:100%}
+  .filter-pills{width:100%;justify-content:center}
+  .search-box{margin-left:0;width:100%}
+  .search-box input,.search-box input:focus{width:100%}
+}
+
+/* ── Skeleton ─────────────────────────────────────────────── */
+.skeleton{
+  background:linear-gradient(90deg,rgba(148,163,184,.06) 25%,rgba(148,163,184,.12) 50%,rgba(148,163,184,.06) 75%);
+  background-size:200% 100%;
+  animation:skeletonShine 1.5s infinite;
+  border-radius:8px;
+}
+@keyframes skeletonShine{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<header class="header">
+  <div class="container">
+    <h1>🔍 域名批量查询</h1>
+    <p>RDAP + Whois 多源查询<span>·</span>完全免费<span>·</span>无需 API Key</p>
+  </div>
+</header>
+
+<main class="container">
+
+<!-- ═══ Configuration ═══ -->
+<section class="glass config-card" id="configCard">
+  <!-- Row 1 -->
+  <div class="config-row">
+    <div class="field">
+      <label for="inputPrefix">前缀 Prefix</label>
+      <input type="text" id="inputPrefix" placeholder="ai / app / 留空" value="ai" oninput="updatePreview()">
+    </div>
+    <div class="field">
+      <label for="inputLength">域名长度 Length</label>
+      <input type="number" id="inputLength" value="5" min="2" max="10" oninput="updatePreview()">
+    </div>
+    <div class="field">
+      <label for="inputSuffix">后缀 Suffix</label>
+      <input type="text" id="inputSuffix" placeholder="am / box / 留空" oninput="updatePreview()">
+    </div>
+    <div class="field">
+      <label for="selectRange">字母范围</label>
+      <select id="selectRange" onchange="updatePreview()">
+        <option value="a-z">a – z (26)</option>
+        <option value="a-m">a – m (13)</option>
+        <option value="n-z">n – z (13)</option>
+        <option value="a-h">a – h (8)</option>
+        <option value="i-p">i – p (8)</option>
+        <option value="q-z">q – z (10)</option>
+      </select>
+    </div>
+  </div>
+  <!-- Row 2 – TLD -->
+  <div class="config-row">
+    <div class="field" style="flex:1;min-width:100%">
+      <label>TLD 选择</label>
+      <div class="tld-group" id="tldGroup">
+        <span class="tld-pill active" data-tld="com" onclick="toggleTld(this)">.com</span>
+        <span class="tld-pill active" data-tld="cn" onclick="toggleTld(this)">.cn</span>
+        <span class="tld-pill" data-tld="net" onclick="toggleTld(this)">.net</span>
+        <span class="tld-pill" data-tld="org" onclick="toggleTld(this)">.org</span>
+        <span class="tld-pill" data-tld="io" onclick="toggleTld(this)">.io</span>
+        <span class="tld-pill" data-tld="ai" onclick="toggleTld(this)">.ai</span>
+        <span class="tld-pill" data-tld="app" onclick="toggleTld(this)">.app</span>
+        <span class="tld-pill" data-tld="dev" onclick="toggleTld(this)">.dev</span>
+      </div>
+    </div>
+  </div>
+  <!-- Row 3 -->
+  <div class="config-row">
+    <div class="field">
+      <label for="inputConcurrent">并发批次</label>
+      <input type="number" id="inputConcurrent" value="3" min="1" max="8">
+    </div>
+    <div class="field">
+      <label for="inputBatchSize">每批数量</label>
+      <input type="number" id="inputBatchSize" value="10" min="5" max="20">
+    </div>
+    <div class="preview-label" id="previewLabel">
+      <span>📊</span> 组合: <strong id="previewText">ai + 3位字母 = 17,576 个 × 2 后缀 = 35,152 次查询</strong>
+    </div>
+  </div>
+  <!-- Row 4 – Buttons -->
+  <div class="config-row">
+    <div class="btn-row" style="flex:1">
+      <span id="apiStatus" class="api-status api-status-loading" title="点击测试 API 连通">检测中…</span>
+      <button class="btn btn-primary" id="btnStart" onclick="toggleStart()">
+        <span>▶</span> 开始查询
+      </button>
+      <button class="btn btn-amber hidden" id="btnPause" onclick="togglePause()">
+        <span>⏸</span> 暂停
+      </button>
+      <button class="btn btn-red hidden" id="btnStop" onclick="stopCheck()">
+        <span>⏹</span> 停止
+      </button>
+      <button class="btn btn-indigo" id="btnRecheck" onclick="recheckFailed()" disabled>
+        <span>🔄</span> 重查失败
+      </button>
+      <button class="btn btn-green" id="btnExportCSV" onclick="exportCSV()" disabled>
+        <span>📥</span> 导出 CSV
+      </button>
+      <button class="btn btn-purple" id="btnExportAvail" onclick="exportAvailable()" disabled>
+        <span>💎</span> 导出可注册
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Statistics ═══ -->
+<section class="stats-grid" id="statsGrid">
+  <div class="glass stat-card blue" id="statTotal">
+    <div class="stat-number" id="statTotalNum">0</div>
+    <div class="stat-label">已查询</div>
+  </div>
+  <div class="glass stat-card green" id="statAvailable">
+    <div class="stat-number" id="statAvailNum">0</div>
+    <div class="stat-label">可注册</div>
+  </div>
+  <div class="glass stat-card purple" id="statPremium">
+    <div class="stat-number" id="statPremiumNum">0</div>
+    <div class="stat-label">可能溢价</div>
+  </div>
+  <div class="glass stat-card red" id="statTaken">
+    <div class="stat-number" id="statTakenNum">0</div>
+    <div class="stat-label">已注册</div>
+  </div>
+  <div class="glass stat-card amber" id="statError">
+    <div class="stat-number" id="statErrorNum">0</div>
+    <div class="stat-label">查询失败</div>
+  </div>
+  <div class="glass stat-card cyan" id="statSpeed">
+    <div class="stat-number" id="statSpeedNum">0</div>
+    <div class="stat-label">速度<span class="stat-unit">个/分钟</span></div>
+  </div>
+</section>
+
+<!-- ═══ Progress ═══ -->
+<div class="glass progress-wrap" id="progressWrap">
+  <span class="progress-text" id="progressPct">0%</span>
+  <div class="progress-bar-outer">
+    <div class="progress-bar-inner" id="progressBar"></div>
+  </div>
+  <span class="progress-eta" id="progressEta">预计剩余: --</span>
+</div>
+
+<!-- ═══ Results ═══ -->
+<section class="glass results-card" id="resultsCard">
+  <div class="results-header">
+    <div class="filter-pills" id="filterPills">
+      <span class="filter-pill active" data-filter="all" onclick="setFilter('all',this)">全部</span>
+      <span class="filter-pill" data-filter="available" onclick="setFilter('available',this)">仅可注册</span>
+      <span class="filter-pill" data-filter="premium" onclick="setFilter('premium',this)">可能溢价</span>
+      <span class="filter-pill" data-filter="taken" onclick="setFilter('taken',this)">已注册</span>
+      <span class="filter-pill" data-filter="error" onclick="setFilter('error',this)">失败</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="搜索域名…" oninput="onSearchInput()">
+    </div>
+    <span class="result-count" id="resultCount">0 条结果</span>
+  </div>
+  <!-- Alpha nav -->
+  <div class="alpha-nav" id="alphaNav"></div>
+  <!-- Table -->
+  <div class="results-table-wrap" id="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th>域名</th>
+          <th>后缀</th>
+          <th>状态</th>
+          <th>溢价原因</th>
+          <th>来源</th>
+          <th>置信度</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+    <div class="table-footer hidden" id="tableFooter">仅显示前 500 条，请使用筛选或导出查看全部</div>
+  </div>
+  <!-- Empty state -->
+  <div class="empty-state" id="emptyState">
+    <div class="icon">🌐</div>
+    <p>配置参数后点击「开始查询」，结果将实时显示在此处</p>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   Domain Batch Query – Frontend Logic
+   ══════════════════════════════════════════════════════════════ */
+
+// ── Constants ──
+const AVAILABLE_TLDS = ['com','cn','net','org','io','ai','app','dev'];
+const MAX_DISPLAY = 500;
+const ALIYUN_URL = 'https://wanwang.aliyun.com/domain/searchresult/#/?keyword=';
+const GODADDY_URL = 'https://www.godaddy.com/domainsearch/find?domainToCheck=';
+
+const COMMON_WORDS = new Set([
+  'the','be','to','of','and','in','that','have','it','for','not','on','with','he','as','you',
+  'do','at','this','but','his','by','from','they','we','say','her','she','or','an','will',
+  'my','one','all','would','there','their','what','so','up','out','if','about','who','get',
+  'which','go','me','when','make','can','like','time','no','just','him','know','take','people',
+  'into','year','your','good','some','could','them','see','other','than','then','now','look',
+  'only','come','its','over','think','also','back','after','use','two','how','our','work',
+  'first','well','way','even','new','want','because','any','these','give','day','most','us',
+  'ai','app','bit','box','car','cat','cup','cut','day','dog','eat','end','eye','fan','far',
+  'few','fly','for','fun','gas','get','god','got','gun','guy','had','has','hat','her','him',
+  'his','hit','hot','how','ice','ill','its','job','joy','key','kid','lay','led','leg','let',
+  'lie','lip','log','lot','low','map','may','men','met','mix','mom','mrs','nor','not','now',
+  'nut','odd','off','oil','old','one','our','out','own','pay','per','pet','pin','pop','put',
+  'ran','raw','red','rid','row','run','sad','sat','saw','say','sea','set','she','sir','sit',
+  'six','sky','son','sun','tax','tea','ten','the','tie','tip','toe','too','top','try','two',
+  'use','van','war','was','way','web','who','why','win','won','yes','yet','you','zoo',
+  'love','life','best','free','home','good','play','game','code','data','tech','beta',
+  'meta','nano','mega','giga','auto','info','news','shop','club','chat','mail','bank',
+  'cash','gold','star','moon','fire','dark','lite','fast','easy','cool','next','open',
+  'safe','pure','true','real','link','sync','flex','core','edge','node','hub','lab','dev',
+  'pro','net','pay','buy','sell','bid','win','top','max','zen','bit','byte','chip','ping',
+  'go','ok','no','hi','up','my','us','me','do','so','ox','ax'
+]);
+
+const badgeClass = {available:'badge-available',taken:'badge-taken',error:'badge-error',premium:'badge-premium'};
+const statusText = {available:'✓ 可注册',taken:'✗ 已注册',error:'? 失败',premium:'💎 可能溢价'};
+const methodText = {primary:'主源直查',fallback:'备用源',all_failed:'全失败'};
+const confText = {VERY_HIGH:'极高',HIGH:'高',MEDIUM:'中',LOW:'低'};
+const confColor = {VERY_HIGH:'conf-VERY_HIGH',HIGH:'conf-HIGH',MEDIUM:'conf-MEDIUM',LOW:'conf-LOW'};
+
+function formatRelativeTime(unix){
+  if(!unix) return '';
+  const diff = Math.floor((Date.now()/1000) - unix);
+  if(diff < 5) return '刚刚';
+  if(diff < 60) return diff + '秒前';
+  if(diff < 3600) return Math.floor(diff/60) + '分钟前';
+  if(diff < 86400) return Math.floor(diff/3600) + '小时前';
+  return Math.floor(diff/86400) + '天前';
+}
+
+// ── State ──
+let allResults = [];
+let running = false;
+let paused = false;
+let controller = null;
+let taskQueue = [];
+let queueIndex = 0;
+let checked = 0;
+let total = 0;
+let startTime = null;
+let filterMode = 'all';
+let alphaFilter = '';
+let searchQuery = '';
+let stats = {available:0,taken:0,error:0,premium:0};
+let batchSize = 10;
+let concurrent = 3;
+let speedInterval = null;
+let lastChecked = 0;
+let lastSpeedTime = 0;
+
+// ── DOM refs ──
+const $ = id => document.getElementById(id);
+
+// ── Init ──
+(function init(){
+  // Build alpha nav
+  const nav = $('alphaNav');
+  const allBtn = document.createElement('span');
+  allBtn.className = 'alpha-btn active';
+  allBtn.textContent = '全';
+  allBtn.onclick = () => setAlpha('',allBtn);
+  nav.appendChild(allBtn);
+  for(let i=0;i<26;i++){
+    const c = String.fromCharCode(97+i);
+    const btn = document.createElement('span');
+    btn.className = 'alpha-btn';
+    btn.textContent = c;
+    btn.onclick = () => setAlpha(c,btn);
+    nav.appendChild(btn);
+  }
+  // API status click to retest
+  $('apiStatus').addEventListener('click', pingApi);
+  updatePreview();
+  pingApi();
+})();
+
+// ── API Health Check ──
+async function pingApi(){
+  const el = $('apiStatus');
+  el.className = 'api-status api-status-loading';
+  el.textContent = '检测中…';
+  const t0 = Date.now();
+  try{
+    const r = await fetch('/api/check',{method:'GET', signal:controller ? controller.signal : undefined});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const ms = Date.now() - t0;
+    const tlds = data.bootstrap_loaded || 0;
+    el.className = 'api-status api-status-ok';
+    el.title = `API 可用 · ${tlds} 个 TLD 缓存 · 响应 ${ms}ms\n点击重新测试`;
+    el.textContent = `API 就绪 · ${tlds} TLD · ${ms}ms`;
+  }catch(e){
+    el.className = 'api-status api-status-error';
+    el.title = 'API 不可达: ' + e.message + '\n点击重新测试';
+    el.textContent = 'API 不可达';
+  }
+}
+
+// ── TLD Toggle ──
+function toggleTld(el){
+  el.classList.toggle('active');
+  updatePreview();
+}
+function getActiveTlds(){
+  return Array.from(document.querySelectorAll('.tld-pill.active')).map(e=>e.dataset.tld);
+}
+
+// ── Letter Range ──
+function getAvailableLetters(){
+  const v = $('selectRange').value;
+  const [a,b] = v.split('-');
+  const start = a.charCodeAt(0), end = b.charCodeAt(0);
+  const letters = [];
+  for(let i=start;i<=end;i++) letters.push(String.fromCharCode(i));
+  return letters;
+}
+
+// ── Middle Combos Generator ──
+function generateMiddleCombos(len, letters){
+  if(len<=0) return [''];
+  const results = [];
+  const total = Math.pow(letters.length, len);
+  for(let i=0;i<total;i++){
+    let s = '';
+    let n = i;
+    for(let j=0;j<len;j++){
+      s = letters[n % letters.length] + s;
+      n = Math.floor(n / letters.length);
+    }
+    results.push(s);
+  }
+  return results;
+}
+
+// ── Domain Generation ──
+function generateDomains(prefix, middleLen, customSuffix, letters, tlds){
+  const combos = generateMiddleCombos(middleLen, letters);
+  const domains = [];
+  for(const middle of combos){
+    const base = prefix + middle + customSuffix;
+    for(const tld of tlds){
+      domains.push(base + '.' + tld);
+    }
+  }
+  return domains;
+}
+
+// ── Preview Update ──
+function updatePreview(){
+  const prefix = $('inputPrefix').value.trim().toLowerCase();
+  const totalLen = parseInt($('inputLength').value) || 5;
+  const suffix = $('inputSuffix').value.trim().toLowerCase();
+  const letters = getAvailableLetters();
+  const tlds = getActiveTlds();
+  const middleLen = Math.max(0, totalLen - prefix.length - suffix.length);
+  const combos = Math.pow(letters.length, middleLen);
+  const tldCount = tlds.length || 1;
+  const totalQueries = combos * tldCount;
+
+  const prefixStr = prefix || '(无前缀)';
+  const suffixStr = suffix ? ` + "${suffix}"` : '';
+  $('previewText').innerHTML =
+    `${prefixStr}${suffixStr} + ${middleLen}位字母(${letters.length}选) = ${combos.toLocaleString()} 个 × ${tldCount} 后缀 = <strong>${totalQueries.toLocaleString()}</strong> 次查询`;
+}
+
+// ── Premium Detection (client-side heuristic) ──
+function isPremiumDomain(domainBase, tld){
+  const name = domainBase.toLowerCase();
+  const len = name.length;
+
+  // Common word check
+  if(COMMON_WORDS.has(name)) return {premium:true, reason:'常见英文单词'};
+
+  // Pure numeric
+  if(/^\d+$/.test(name)){
+    if(len <= 4) return {premium:true, reason:`${len}位纯数字`};
+    return {premium:false, reason:''};
+  }
+
+  // Length-based
+  if(len <= 2) return {premium:true, reason:`${len}位极短域名`};
+  if(len === 3){
+    if(/^[a-z]{3}$/.test(name)) return {premium:true, reason:'3位纯字母'};
+    return {premium:true, reason:'3位短域名'};
+  }
+  if(len === 4 && /^[a-z]{4}$/.test(name)) return {premium:true, reason:'4位纯字母'};
+  if(len === 4 && /^[a-z0-9]{4}$/.test(name)) return {premium:true, reason:'4位短域名'};
+
+  // Repeating pattern
+  if(/^(.)\1+$/.test(name)) return {premium:true, reason:'重复字符'};
+  if(/^(..)\1+$/.test(name) && len <=6) return {premium:true, reason:'重复模式'};
+
+  // CVCV / pronounceable 4-letter
+  if(len === 4){
+    const vowels = 'aeiou';
+    const p = name.split('').map(c=>vowels.includes(c)?'v':'c').join('');
+    if(p==='cvcv'||p==='cvvc'||p==='cvcc'||p==='ccvc') return {premium:true, reason:'4位可发音'};
+  }
+
+  // 5-letter common
+  if(len === 5 && COMMON_WORDS.has(name)) return {premium:true, reason:'常见5位单词'};
+
+  return {premium:false, reason:''};
+}
+
+// ── Start / Pause / Resume ──
+function toggleStart(){
+  if(running && !paused){
+    // Should not happen; use pause btn
+    return;
+  }
+  if(paused){
+    resumeCheck();
+    return;
+  }
+  startCheck();
+}
+
+async function startCheck(){
+  const prefix = $('inputPrefix').value.trim().toLowerCase();
+  const totalLen = parseInt($('inputLength').value) || 5;
+  const suffix = $('inputSuffix').value.trim().toLowerCase();
+  const letters = getAvailableLetters();
+  const tlds = getActiveTlds();
+  batchSize = Math.max(5,Math.min(20,parseInt($('inputBatchSize').value)||10));
+  concurrent = Math.max(1,Math.min(8,parseInt($('inputConcurrent').value)||3));
+
+  if(!tlds.length){alert('请至少选择一个 TLD');return;}
+  const middleLen = Math.max(0, totalLen - prefix.length - suffix.length);
+  if(middleLen < 0){alert('总长度不能小于前缀+后缀的长度');return;}
+  if(Math.pow(letters.length, middleLen) > 500000){
+    if(!confirm('组合数量超过 50 万，查询可能需要很长时间，是否继续？')) return;
+  }
+
+  // Generate
+  taskQueue = generateDomains(prefix, middleLen, suffix, letters, tlds);
+  total = taskQueue.length;
+  queueIndex = 0;
+  checked = 0;
+  allResults = [];
+  stats = {available:0,taken:0,error:0,premium:0};
+  running = true;
+  paused = false;
+  startTime = Date.now();
+  lastChecked = 0;
+  lastSpeedTime = Date.now();
+  controller = new AbortController();
+
+  updateUI_running();
+  updateStats();
+  updateProgress();
+  renderTable();
+
+  speedInterval = setInterval(calcSpeed, 3000);
+
+  const workers = Array.from({length:concurrent}, ()=>processQueue());
+  await Promise.all(workers);
+  finishCheck();
+}
+
+function togglePause(){
+  if(!running) return;
+  if(paused){
+    resumeCheck();
+  } else {
+    paused = true;
+    $('btnPause').innerHTML = '<span>▶</span> 继续';
+  }
+}
+
+function resumeCheck(){
+  if(!running) return;
+  paused = false;
+  $('btnPause').innerHTML = '<span>⏸</span> 暂停';
+  // Restart workers
+  const workers = Array.from({length:concurrent}, ()=>processQueue());
+  Promise.all(workers).then(()=>{
+    if(running) finishCheck();
+  });
+}
+
+function stopCheck(){
+  running = false;
+  paused = false;
+  if(controller) controller.abort();
+  if(speedInterval) clearInterval(speedInterval);
+  updateUI_stopped();
+}
+
+function finishCheck(){
+  running = false;
+  paused = false;
+  if(speedInterval) clearInterval(speedInterval);
+  updateUI_stopped();
+  updateProgress();
+  calcSpeed();
+}
+
+// ── Queue Worker ──
+async function processQueue(){
+  while(queueIndex < taskQueue.length && running && !paused){
+    const batch = taskQueue.slice(queueIndex, queueIndex + batchSize);
+    queueIndex += batchSize;
+
+    try{
+      const response = await fetch('/api/check',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({domains:batch}),
+        signal:controller.signal
+      });
+      const data = await response.json();
+      if(data.results){
+        for(const result of data.results){
+          handleResult(result);
+        }
+      }
+    }catch(e){
+      if(e.name==='AbortError') break;
+      for(const d of batch){
+        const parts = d.split('.');
+        const tld = parts.pop();
+        const base = parts.join('.');
+        handleResult({domain:d, suffix:tld, status:'error', premium:false, premiumReason:'', method:'fetch_error', detail:e.message});
+      }
+    }
+  }
+}
+
+// ── Result Handler ──
+function handleResult(result){
+  // Determine display status
+  let displayStatus = result.status;
+  let premiumReason = result.premiumReason || '';
+  if(result.status === 'available'){
+    // Client-side premium check
+    const parts = result.domain.split('.');
+    const tld = parts.pop();
+    const base = parts.join('.');
+    const premCheck = isPremiumDomain(base, tld);
+    if(result.premium || premCheck.premium){
+      displayStatus = 'premium';
+      premiumReason = result.premiumReason || premCheck.reason;
+      stats.premium++;
+    } else {
+      stats.available++;
+    }
+  } else if(result.status === 'taken'){
+    stats.taken++;
+  } else {
+    stats.error++;
+  }
+
+  const entry = {
+    index: allResults.length + 1,
+    domain: result.domain,
+    suffix: result.suffix || result.domain.split('.').pop(),
+    status: displayStatus,
+    premiumReason: premiumReason,
+    method: result.method || '',
+    detail: result.detail || '',
+    confidence: result.confidence || 'LOW',
+    is_whois: !!result.is_whois,
+    sources_ok: result.sources_ok || 0,
+    sources_total: result.sources_total || 0,
+    checked_at: result.checked_at || 0
+  };
+  allResults.push(entry);
+  checked++;
+
+  updateStats();
+  updateProgress();
+  appendRow(entry);
+}
+
+// ── Stats ──
+function updateStats(){
+  $('statTotalNum').textContent = checked.toLocaleString();
+  $('statAvailNum').textContent = stats.available.toLocaleString();
+  $('statPremiumNum').textContent = stats.premium.toLocaleString();
+  $('statTakenNum').textContent = stats.taken.toLocaleString();
+  $('statErrorNum').textContent = stats.error.toLocaleString();
+}
+
+function calcSpeed(){
+  const now = Date.now();
+  const elapsed = (now - startTime) / 60000; // minutes
+  const speed = elapsed > 0 ? Math.round(checked / elapsed) : 0;
+  $('statSpeedNum').textContent = speed.toLocaleString();
+}
+
+// ── Progress ──
+function updateProgress(){
+  const pct = total > 0 ? (checked / total * 100) : 0;
+  $('progressPct').textContent = pct.toFixed(1) + '%';
+  $('progressBar').style.width = pct + '%';
+
+  if(checked > 0 && running){
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = checked / elapsed;
+    const remaining = (total - checked) / rate;
+    $('progressEta').textContent = '预计剩余: ' + formatTime(remaining);
+  } else if(!running && checked > 0){
+    $('progressEta').textContent = '已完成';
+  } else {
+    $('progressEta').textContent = '预计剩余: --';
+  }
+}
+
+function formatTime(seconds){
+  if(!isFinite(seconds) || seconds < 0) return '--';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  if(m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+
+// ── Table Rendering ──
+function matchesFilter(entry){
+  if(filterMode !== 'all' && entry.status !== filterMode) return false;
+  if(alphaFilter){
+    const base = entry.domain.split('.')[0];
+    if(!base.startsWith(alphaFilter)) return false;
+  }
+  if(searchQuery && !entry.domain.includes(searchQuery)) return false;
+  return true;
+}
+
+function getFilteredResults(){
+  return allResults.filter(matchesFilter);
+}
+
+function renderTable(){
+  const tbody = $('resultsBody');
+  const filtered = getFilteredResults();
+  const show = filtered.slice(0, MAX_DISPLAY);
+  tbody.innerHTML = '';
+  for(const entry of show){
+    tbody.appendChild(createRow(entry));
+  }
+  $('tableFooter').classList.toggle('hidden', filtered.length <= MAX_DISPLAY);
+  $('resultCount').textContent = filtered.length.toLocaleString() + ' 条结果';
+  $('emptyState').classList.toggle('hidden', allResults.length > 0);
+  $('tableWrap').classList.toggle('hidden', allResults.length === 0);
+}
+
+function appendRow(entry){
+  if(!matchesFilter(entry)) return;
+  const tbody = $('resultsBody');
+  const rowCount = tbody.children.length;
+  if(rowCount >= MAX_DISPLAY){
+    $('tableFooter').classList.remove('hidden');
+    updateResultCount();
+    return;
+  }
+  tbody.appendChild(createRow(entry));
+  $('emptyState').classList.add('hidden');
+  $('tableWrap').classList.remove('hidden');
+  updateResultCount();
+}
+
+function updateResultCount(){
+  const filtered = getFilteredResults();
+  $('resultCount').textContent = filtered.length.toLocaleString() + ' 条结果';
+}
+
+function createRow(entry){
+  const tr = document.createElement('tr');
+  const isAvailOrPrem = entry.status === 'available' || entry.status === 'premium';
+  const domainBase = entry.domain.split('.').slice(0,-1).join('.');
+
+  let actionHTML = '';
+  if(isAvailOrPrem){
+    actionHTML = `<a class="action-link" href="${ALIYUN_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">阿里云</a>
+      <a class="action-link" href="${GODADDY_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">GoDaddy</a>`;
+  }
+
+  // 来源标签：附加 sources_ok/total 和 WHOIS 标识
+  let methodHTML = '';
+  const methodBase = methodText[entry.method] || escapeHtml(entry.method);
+  const sourcesCount = entry.sources_total > 0
+    ? ` <span style="color:#94a3b8;font-size:10px">${entry.sources_ok}/${entry.sources_total}</span>`
+    : '';
+  const whoisTag = entry.is_whois ? ' whois' : '';
+  methodHTML = `<span class="method-tag${whoisTag}" title="${entry.is_whois ? 'WHOIS 协议' : 'RDAP 协议'}">${methodBase}${sourcesCount}</span>`;
+
+  // 置信度
+  const confKey = entry.confidence || 'LOW';
+  const confHTML = `<span class="confidence ${confColor[confKey]||'conf-LOW'}" title="置信度: ${confKey}"><span class="conf-dot"></span>${confText[confKey]||confKey}</span>`;
+
+  // 时间戳 tooltip
+  const timeStr = formatRelativeTime(entry.checked_at);
+  if(timeStr) tr.title = '查询于 ' + timeStr;
+
+  tr.innerHTML = `
+    <td>${entry.index}</td>
+    <td class="domain-cell">${escapeHtml(domainBase)}</td>
+    <td class="tld-cell">.${escapeHtml(entry.suffix)}</td>
+    <td><span class="badge ${badgeClass[entry.status]||'badge-error'}">${statusText[entry.status]||entry.status}</span></td>
+    <td style="color:#64748b;font-size:12px">${escapeHtml(entry.premiumReason)}</td>
+    <td>${methodHTML}</td>
+    <td>${confHTML}</td>
+    <td><div class="action-links">${actionHTML}</div></td>`;
+  return tr;
+}
+
+function escapeHtml(s){
+  if(!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Filters ──
+function setFilter(mode, el){
+  filterMode = mode;
+  document.querySelectorAll('.filter-pill').forEach(p=>p.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderTable();
+}
+function setAlpha(letter, el){
+  alphaFilter = letter;
+  document.querySelectorAll('.alpha-btn').forEach(b=>b.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderTable();
+}
+function onSearchInput(){
+  searchQuery = $('searchInput').value.trim().toLowerCase();
+  renderTable();
+}
+
+// ── Export ──
+function exportCSV(){
+  if(!allResults.length) return;
+  const BOM = '\uFEFF';
+  let csv = BOM + '序号,域名,后缀,状态,溢价原因,来源,协议,置信度,数据源,时间\n';
+  for(const r of allResults){
+    const proto = r.is_whois ? 'WHOIS' : 'RDAP';
+    const sources = r.sources_total > 0 ? `${r.sources_ok}/${r.sources_total}` : '';
+    const time = r.checked_at ? new Date(r.checked_at*1000).toLocaleString('zh-CN') : '';
+    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${methodText[r.method]||r.method}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
+  }
+  downloadFile(csv, '域名查询结果_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
+}
+
+function exportAvailable(){
+  const avail = allResults.filter(r=>r.status==='available'||r.status==='premium');
+  if(!avail.length){alert('没有可注册的域名');return;}
+  const BOM = '\uFEFF';
+  let csv = BOM + '序号,域名,后缀,状态,溢价原因,来源,协议,置信度,数据源,时间\n';
+  for(const r of avail){
+    const proto = r.is_whois ? 'WHOIS' : 'RDAP';
+    const sources = r.sources_total > 0 ? `${r.sources_ok}/${r.sources_total}` : '';
+    const time = r.checked_at ? new Date(r.checked_at*1000).toLocaleString('zh-CN') : '';
+    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${methodText[r.method]||r.method}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
+  }
+  downloadFile(csv, '可注册域名_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
+}
+
+function downloadFile(content, filename, type){
+  const blob = new Blob([content],{type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function getTimestamp(){
+  const d=new Date();
+  return d.getFullYear()+''+(d.getMonth()+1+'').padStart(2,'0')+(d.getDate()+'').padStart(2,'0')+'_'+(d.getHours()+'').padStart(2,'0')+(d.getMinutes()+'').padStart(2,'0');
+}
+
+// ── Recheck Failed ──
+async function recheckFailed(){
+  const failed = allResults.filter(r=>r.status==='error');
+  if(!failed.length){alert('没有失败的查询');return;}
+
+  // Remove old failed entries
+  allResults = allResults.filter(r=>r.status!=='error');
+  stats.error = 0;
+  checked = allResults.length;
+  total = checked + failed.length;
+
+  taskQueue = failed.map(r=>r.domain);
+  queueIndex = 0;
+  running = true;
+  paused = false;
+  startTime = Date.now();
+  controller = new AbortController();
+
+  updateUI_running();
+  updateStats();
+  renderTable();
+
+  speedInterval = setInterval(calcSpeed, 3000);
+  const workers = Array.from({length:concurrent}, ()=>processQueue());
+  await Promise.all(workers);
+  finishCheck();
+}
+
+// ── UI State Helpers ──
+function updateUI_running(){
+  $('btnStart').classList.add('hidden');
+  $('btnPause').classList.remove('hidden');
+  $('btnStop').classList.remove('hidden');
+  $('btnRecheck').disabled = true;
+  $('btnExportCSV').disabled = true;
+  $('btnExportAvail').disabled = true;
+  // Pulse
+  $('statsGrid').classList.add('pulsing');
+  // Disable config
+  document.querySelectorAll('#configCard input, #configCard select').forEach(el=>el.disabled=true);
+}
+
+function updateUI_stopped(){
+  $('btnStart').classList.remove('hidden');
+  $('btnStart').innerHTML = '<span>▶</span> 开始查询';
+  $('btnPause').classList.add('hidden');
+  $('btnStop').classList.add('hidden');
+  $('btnRecheck').disabled = stats.error === 0;
+  $('btnExportCSV').disabled = allResults.length === 0;
+  $('btnExportAvail').disabled = (stats.available + stats.premium) === 0;
+  $('statsGrid').classList.remove('pulsing');
+  document.querySelectorAll('#configCard input, #configCard select').forEach(el=>el.disabled=false);
+}
+</script>
+</body>
+</html>

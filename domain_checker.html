@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>域名批量查询 - ai+aaa 到 ai+zzz</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #1a1a1a; font-size: 14px; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .card { background: #fff; border-radius: 12px; border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+  label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+  input[type=number], select { border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 14px; background: #fafafa; outline: none; }
+  input[type=number]:focus, select:focus { border-color: #4a7cf7; background: #fff; }
+  .suffix-group { display: flex; gap: 8px; }
+  .suffix-btn { border: 1px solid #ddd; border-radius: 8px; padding: 7px 16px; cursor: pointer; font-size: 13px; background: #fafafa; transition: all 0.15s; user-select: none; }
+  .suffix-btn.active { background: #4a7cf7; color: #fff; border-color: #4a7cf7; }
+  .btn { padding: 9px 24px; border-radius: 8px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .btn-primary { background: #4a7cf7; color: #fff; }
+  .btn-primary:hover { background: #3567e8; }
+  .btn-primary:disabled { background: #a0b4f8; cursor: not-allowed; }
+  .btn-pause { background: #f59e0b; color: #fff; }
+  .btn-pause:hover { background: #d97706; }
+  .btn-resume { background: #10b981; color: #fff; }
+  .btn-resume:hover { background: #059669; }
+  .btn-stop { background: #f04040; color: #fff; }
+  .btn-stop:hover { background: #d03030; }
+  .btn-export { background: #22c55e; color: #fff; }
+  .btn-export:hover { background: #16a34a; }
+  .btn-export:disabled { background: #86efac; cursor: not-allowed; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat-card { background: #f8f9fa; border-radius: 10px; padding: 12px 8px; text-align: center; }
+  .stat-num { font-size: 24px; font-weight: 600; line-height: 1; }
+  .stat-label { font-size: 11px; color: #888; margin-top: 4px; }
+  .num-available { color: #16a34a; }
+  .num-taken { color: #dc2626; }
+  .num-error { color: #d97706; }
+  .num-total { color: #4a7cf7; }
+  .num-premium { color: #9333ea; }
+  .progress-wrap { margin-bottom: 16px; }
+  .progress-bar-bg { background: #eee; border-radius: 6px; height: 10px; overflow: hidden; }
+  .progress-bar { height: 10px; border-radius: 6px; background: #4a7cf7; transition: width 0.3s; width: 0; }
+  .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-top: 4px; }
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .filter-btn { border: 1px solid #ddd; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; background: #fafafa; transition: all 0.15s; }
+  .filter-btn.active { background: #4a7cf7; color: #fff; border-color: #4a7cf7; }
+  .filter-available.active { background: #16a34a; border-color: #16a34a; }
+  .filter-premium.active { background: #9333ea; border-color: #9333ea; }
+  .search-input { border: 1px solid #ddd; border-radius: 6px; padding: 5px 10px; font-size: 12px; outline: none; width: 160px; }
+  .search-input:focus { border-color: #4a7cf7; }
+  .results-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .results-table th { text-align: left; padding: 8px 12px; background: #f8f9fa; color: #555; font-weight: 500; border-bottom: 1px solid #eee; position: sticky; top: 0; z-index: 1; }
+  .results-table td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; }
+  .results-table tr:hover td { background: #fafafa; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+  .badge-available { background: #dcfce7; color: #16a34a; }
+  .badge-taken { background: #fee2e2; color: #dc2626; }
+  .badge-error { background: #fef3c7; color: #d97706; }
+  .badge-checking { background: #dbeafe; color: #2563eb; }
+  .badge-premium { background: #f3e8ff; color: #9333ea; }
+  .results-scroll { max-height: 440px; overflow-y: auto; }
+  .status-bar { font-size: 12px; color: #888; padding: 8px 0; }
+  .link-small { color: #4a7cf7; text-decoration: none; font-size: 12px; }
+  .link-small:hover { text-decoration: underline; }
+  .tip { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #92400e; margin-bottom: 16px; line-height: 1.6; }
+  .tip-premium { background: #faf5ff; border: 1px solid #d8b4fe; color: #6b21a8; margin-top: 8px; }
+  .hidden { display: none; }
+  .range-info { font-size: 12px; color: #666; }
+  .alpha-nav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .alpha-btn { border: 1px solid #ddd; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px; background: #fafafa; color: #555; }
+  .alpha-btn:hover { background: #4a7cf7; color: #fff; border-color: #4a7cf7; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>域名批量查询工具</h1>
+  <p class="subtitle">免费服务器部署：由后端代查 RDAP / WHOIS，前端只负责展示结果</p>
+
+  <div class="tip">
+    ⚠️ <strong>通用批量域名查询：</strong>支持<strong>任意前缀 + 任意长度 + 任意后缀</strong>。
+    域名 = <code style="background:#f3e8ff;padding:1px 4px;border-radius:3px;">前缀</code> + <code style="background:#f3e8ff;padding:1px 4px;border-radius:3px;">中间字母</code> + <code style="background:#f3e8ff;padding:1px 4px;border-radius:3px;">后缀</code> + <code style="background:#f3e8ff;padding:1px 4px;border-radius:3px;">.com/.cn</code>。
+    例：<strong>ai</strong>+<strong>3位</strong> = aiaaa~aizzz；<strong>(空)</strong>+<strong>5位</strong>+<strong>am</strong> = aaaaam~zzzzam。
+    每个后缀 1~3 个 RDAP 源并发查询，主源快/备用源兜底。建议并发 <strong>3~5</strong>。
+  </div>
+  <div class="tip tip-premium">
+    💎 <strong>溢价检测：</strong>对 RDAP 返回"可注册"的域名，工具会用<strong>启发式规则</strong>标记"可能溢价"的域名（如常见英文单词、重复字母、顺序字母等）。
+    免费 RDAP/WHOIS 不返回真实注册价格；最终价格请以 <a href="https://wanwang.aliyun.com" target="_blank" class="link-small">阿里云</a> 等注册商实际下单页面为准。
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>前缀（可选）</label>
+        <input type="text" id="prefixInput" placeholder="ai / app / 留空" maxlength="20" style="width:130px;border:1px solid #ddd;border-radius:8px;padding:8px 12px;font-size:14px;background:#fafafa;outline:none;">
+      </div>
+      <div>
+        <label>域名长度（总长度 = 前缀 + 中间字母 + 后缀）</label>
+        <input type="number" id="domainLength" value="5" min="2" max="10" style="width:80px;border:1px solid #ddd;border-radius:8px;padding:8px 12px;font-size:14px;background:#fafafa;outline:none;">
+      </div>
+      <div>
+        <label>字母范围（首位字母从 a-z 中选）</label>
+        <select id="letterRange" style="width:80px;">
+          <option value="all">a-z</option>
+          <option value="a-m">a-m</option>
+          <option value="n-z">n-z</option>
+          <option value="a-h">a-h</option>
+          <option value="i-p">i-p</option>
+          <option value="q-z">q-z</option>
+        </select>
+      </div>
+      <div>
+        <label>后缀（可选，如 am / box）</label>
+        <input type="text" id="suffixInput" placeholder="am / box / 留空" maxlength="20" style="width:130px;border:1px solid #ddd;border-radius:8px;padding:8px 12px;font-size:14px;background:#fafafa;outline:none;">
+      </div>
+      <div>
+        <label>后缀域（.com / .cn）</label>
+        <div class="suffix-group" id="suffixGroup"></div>
+      </div>
+      <div>
+        <label>并发数（推荐3-5）</label>
+        <input type="number" id="concurrency" value="5" min="1" max="20" style="width:90px;">
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:8px;">
+      <div style="flex:1;">
+        <label id="previewLabel" style="font-size:12px;color:#4a7cf7;">组合数：--</label>
+      </div>
+    </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="startBtn" onclick="toggleStart()">开始查询</button>
+      <button class="btn btn-stop hidden" id="stopBtn" onclick="stopCheck()">停止</button>
+      <button class="btn btn-export" id="recheckBtn" onclick="recheckFailed()" disabled style="background:#6366f1;">仅重查失败</button>
+      <button class="btn btn-export" id="exportBtn" onclick="exportCSV()" disabled>导出 CSV</button>
+      <button class="btn btn-export" id="exportAvailBtn" onclick="exportAvailable()" disabled style="background:#6366f1;">仅导出可注册</button>
+      <button class="btn btn-export" id="openInEdgeBtn" onclick="openInEdge()" style="background:#0078d4;">在 Edge 中打开</button>
+      <span class="status-bar" id="statusBar">就绪</span>
+    </div>
+  </div>
+
+  <div class="card" id="corsDiag" style="background:#f0f9ff;border-color:#7dd3fc;">
+    <div style="font-size:13px;color:#0c4a6e;line-height:1.6;">
+      <strong>🔍 CORS 诊断</strong>（点 <button class="btn" style="background:#0ea5e9;color:#fff;padding:4px 10px;font-size:12px;" onclick="diagCORS()">测试 CORS</button> 或点上方"在 Edge 中打开"切换到 Edge 浏览器）
+      <div id="corsResult" style="margin-top:8px;color:#334155;">点击"测试 CORS"按钮后，会告诉你当前浏览器是否能查询 RDAP 服务器。</div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-num num-total" id="statTotal">0</div>
+      <div class="stat-label">已查询</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num num-available" id="statAvailable">0</div>
+      <div class="stat-label">可注册</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num num-premium" id="statPremium">0</div>
+      <div class="stat-label">可能溢价</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num num-taken" id="statTaken">0</div>
+      <div class="stat-label">已注册</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num num-error" id="statError">0</div>
+      <div class="stat-label">查询失败</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" id="statSpeed" style="color:#7c3aed;">0</div>
+      <div class="stat-label">个/分钟</div>
+    </div>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
+    <div class="progress-text">
+      <span id="progressPct">0%</span>
+      <span id="progressEta">预计剩余: --</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="filter-row">
+      <strong style="font-size:12px;color:#444;">筛选：</strong>
+      <div class="filter-btn active" onclick="setFilter('all', this)">全部</div>
+      <div class="filter-btn filter-available" onclick="setFilter('available', this)">仅可注册</div>
+      <div class="filter-btn filter-premium" onclick="setFilter('premium', this)">可能溢价</div>
+      <div class="filter-btn" onclick="setFilter('taken', this)">已注册</div>
+      <div class="filter-btn" onclick="setFilter('error', this)">失败</div>
+      <input class="search-input" id="searchInput" placeholder="搜索域名..." oninput="onSearchInput()">
+      <span id="searchHint" style="font-size:11px;color:#d97706;display:none;">⚠️ 查询中，新结果不在表格中显示，清空搜索框即可查看</span>
+      <span style="flex:1;"></span>
+      <span class="status-bar" id="resultCount">共 0 条</span>
+    </div>
+    <div class="alpha-nav" id="alphaNav"></div>
+    <div class="results-scroll">
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th style="width:40px;">#</th>
+            <th>域名</th>
+            <th>后缀</th>
+            <th>状态</th>
+            <th>溢价原因</th>
+            <th>来源/详情</th>
+            <th>查询时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+          <tr><td colspan="8" style="text-align:center;color:#aaa;padding:40px 0;">点击「开始查询」后结果将实时显示</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ================== 多源 RDAP 节点 ==================
+// 每个后缀配多个独立的 RDAP 服务器。查询时同时打 N 个源，多数一致才认定。
+// CORS 兼容性已实测（详见记忆日志 10:28）：
+//   ✅ 支持浏览器跨域（access-control-allow-origin: *）：verisign / iana / gname / publicinterestregistry
+//   ❌ 不支持 CORS（浏览器拦截）：markmonitor / publicdomainregistry / cnnic / nic.io / nic.cn
+//   ⚠️ rdap.org：返回 302 重定向到各注册局，浏览器处理有问题，且无 CORS 头
+// 关键发现：rdap.iana.org 对任何 TLD 都带 CORS 头（access-control-allow-origin: *），
+//   即使是 .cn / .io 这种不支持 CORS 的 TLD 也能查，所以 .cn/.io 直接用 iana
+const RDAP_SOURCES = {
+  com: [
+    'https://rdap.verisign.com/com/v1/domain/',      // Verisign 官方，权威
+    'https://rdap.iana.org/domain/',                  // IANA 通用，带 CORS
+    'https://rdap.gname.com/domain/',                 // 国内友好
+  ],
+  net: [
+    'https://rdap.verisign.com/net/v1/domain/',      // Verisign 官方
+    'https://rdap.iana.org/domain/',
+  ],
+  org: [
+    'https://rdap.publicinterestregistry.org/rdap/org/domain/',
+    'https://rdap.iana.org/domain/',
+  ],
+  cn: [
+    'https://rdap.iana.org/domain/',                  // CNNIC 不支持 CORS，但 IANA 对 .cn 带 CORS 头
+  ],
+  io: [
+    'https://rdap.iana.org/domain/',                  // nic.io 不支持 CORS，IANA 替代
+  ],
+  ai: [
+    'https://rdap.nic.ai/domain/',
+    'https://rdap.iana.org/domain/',
+  ],
+  app: [
+    'https://rdap.nic.google/domain/',
+    'https://rdap.iana.org/domain/',
+  ],
+  dev: [
+    'https://rdap.nic.google/domain/',
+    'https://rdap.iana.org/domain/',
+  ],
+};
+
+// 用户可用的后缀
+const AVAILABLE_SUFFIXES = Object.keys(RDAP_SOURCES);
+const SERVER_MODE = location.protocol === 'http:' || location.protocol === 'https:';
+
+let allResults = [];
+let running = false;   // 是否有活跃的查询会话
+let paused = false;    // 是否暂停
+let controller = null;
+let filterMode = 'all';
+let alphaFilter = '';
+let startTime = null;
+let taskQueue = [];
+let taskIndex = 0;     // 下一个待处理的任务索引
+let checked = 0;
+let total = 0;
+let stats = { available: 0, taken: 0, error: 0, premium: 0 };
+
+// ========== 溢价域名启发式检测 ==========
+const COMMON_WORDS = new Set([
+  'box','car','dog','cat','man','boy','kid','sun','sky','sea','map','app','web','net','biz',
+  'pro','top','vip','fun','run','win','lab','job','pay','buy','fit','joy','key','law','log',
+  'mix','tax','tea','way','zoo','art','bar','bed','big','bit','bus','can','cap','cut','day',
+  'die','dry','eat','egg','eye','fan','far','fat','fee','fly','gas','get','god','gun','guy',
+  'hit','hot','ice','let','lie','lot','low','mad','mom','new','nor','now','off','oil','old',
+  'one','out','own','pen','pie','pop','put','red','rid','row','sad','say','set','sex','she',
+  'sit','six','son','ten','too','try','use','van','war','wet','who','why','yes','yet','you',
+  'ace','act','add','age','ago','aid','aim','air','all','any','arm','ask','bad','bag','ban',
+  'bat','bay','beg','bet','bid','bio','bug','cab','cad','cam','cop','cow','cry','cue','cup',
+  'cur','dad','dam','dan','deb','den','dig','dim','dip','dna','doe','dot','dub','due','dug',
+  'duo','ear','ebb','eco','eel','ego','elf','elm','emu','end','era','eve','fad','far','fed',
+  'fen','few','fig','fin','flu','foe','fog','fox','fry','fur','gag','gal','gap','gay','gel',
+  'gem','gif','gin','gum','gut','gym','had','hag','ham','has','hat','hay','hem','hen','her',
+  'hex','hid','hip','his','hod','hoe','hog','hop','hot','how','hub','hue','hug','hum','hut',
+  'ill','imp','ink','inn','ion','ire','irk','jag','jam','jar','jaw','jay','jet','jig','job',
+  'jog','jot','jug','kat','ken','kin','kit','lad','lag','lam','lap','lax','lay','led','lee',
+  'leg','lid','lip','lit','lob','lop','lox','lug','lux','lye','mad','mag','mat','max','may',
+  'men','met','mid','mil','mob','mod','mop','mow','mud','mug','mum','nab','nag','nap','nay',
+  'neg','new','nib','nil','nip','nod','nog','not','nub','nun','nut','oak','oar','oat','odd',
+  'ode','off','oft','ohm','oho','oik','oil','opt','orb','orc','ore','our','ova','owe','owl',
+  'pad','pal','pan','par','pat','paw','pay','pea','peg','pen','pep','per','pet','pew','phi',
+  'pic','pie','pig','pin','pip','pit','ply','pod','poi','pop','pot','pow','pox','pro','pry',
+  'pub','pug','pun','pup','pus','put','pyx','qat','quo','rag','ram','ran','rap','rat','raw',
+  'ray','red','ref','rep','rev','rib','rig','rim','rip','rob','rod','roe','rot','rub','rue',
+  'rug','rum','rut','rye','sac','sag','sap','sat','saw','sax','sea','sec','see','sew','shy',
+  'sib','sic','sin','sip','sir','ski','sly','sob','sod','sol','sop','sot','sow','soy','spa',
+  'spy','sty','sub','sue','sum','sun','sup','tab','tad','tag','tam','tan','tap','tar','tat',
+  'tea','tee','ten','the','thy','tic','tie','tin','tip','tis','toe','tog','tom','ton','too',
+  'top','tor','tot','tow','toy','try','tub','tug','tun','tux','two','uke','ump','urn','vat',
+  'vet','vex','via','vie','vim','vow','wad','wag','wan','was','wax','web','wed','wee','wet',
+  'wig','win','wit','wiz','woe','wok','won','woo','wow','wry','wye','yak','yam','yap','yaw',
+  'yay','yea','yen','yep','yew','yip','yob','yon','yow','yum','yup','zag','zap','zed','zen',
+  'zip','zit',
+  // 补充 3 字母高价值词根（用于 5+ 位域名词根检测）
+  'hop','run','win','fit','let','act','add','ask','bet','big','buy','cut','die','eat','end','fly','get','god','got','gun','has','hat','hit','hot','how','ink','jam','key','kid','lab','let','lie','log','lot','mad','map','mat','may','mix','net','new','now','odd','off','old','one','out','own','pad','pay','pie','pit','put','ran','rat','raw','red','rid','row','run','sat','say','sea','see','set','sick','sir','sit','six','sky','son','sun','tap','tar','tea','ten','the','tie','tip','toe','too','top','try','tub','two','use','van','vet','war','was','wax','wet','who','why','win','wit','wow','yes','yet','you','zip','zoo',
+  // 补充 4-5 字母高价值英文单词（用于 6+ 位域名词根检测）
+  'bird','baby','shop','card','code','data','face','file','game','home','link','mail','news','note','play','rate','star','tech','test','type','view','vote','book','chat','city','club','cool','deal','disk','dock','door','edge','feed','film','fire','fish','food','foot','ford','gift','girl','goal','gold','good','grow','hair','hand','hard','hate','head','help','here','hero','high','hill','hold','hole','host','idea','iron','jack','john','join','jump','keep','king','know','lack','land','late','lazy','lead','life','like','line','list','live','load','lock','long','look','lord','lose','love','luck','made','make','male','mall','mark','meal','meat','meet','mind','miss','mode','moon','more','most','move','much','must','name','navy','near','neat','neck','need','nice','nine','none','norm','nose','noun','okay','once','only','open','over','pace','pack','page','paid','pain','pair','palm','park','part','pass','past','path','peak','pick','pine','pink','pipe','plan','plot','plug','plus','poem','poet','poll','pond','pool','poor','port','post','pour','pray','pull','pump','pure','push','race','rain','rank','rare','read','real','rear','rely','rent','rest','rich','ride','ring','rise','risk','road','rock','rode','role','roll','roof','room','root','rope','rose','ruin','rule','rush','safe','said','sake','sale','salt','same','sand','sang','save','seal','seat','seed','seek','seem','seen','self','sell','send','sept','ship','shut','side','sign','site','size','skin','slip','slow','snow','soft','soil','sold','sole','some','song','soon','sort','soul','spot','stay','stem','step','stop','such','suit','sure','swim','tail','take','tale','talk','tall','tank','tape','task','taxi','team','tell','tend','tent','term','text','than','that','them','then','they','thin','this','thus','tide','till','time','tiny','tire','told','toll','tone','took','tool','tops','tore','torn','tour','town','trap','tree','trim','trio','trip','true','tube','tuck','tune','turn','twin','type','ugly','undo','unit','upon','used','user','vale','vary','vast','verb','very','vest','vice','visa','wade','wage','wait','wake','walk','wall','wand','want','ward','warm','warn','wash','wave','ways','weak','wear','week','well','went','were','west','what','when','whom','wide','wife','wild','will','wind','wine','wing','wire','wise','wish','with','wood','word','wore','work','worm','worn','wrap','yard','year','yell','zero','zone',
+  // 6+ 字母热门 AI/科技/产品词（用于含词检测）
+  'travel','stream','studio','stable','static','status','stereo','store','strong','struck','studio','submit','switch','symbol','system','tables','target','temple','thanks','thirty','though','ticket','toward','travel','triple','trying','tunnel','twelve','twenty','typing','unique','united','unless','unlike','unsafe','update','useful','valley','victor','vision','volume','wealth','weapon','weekly','weight','window','winner','winter','within','wonder','wooden','worker','worthy','wright','yellow','abroad','accept','accuse','across','action','active','actual','agreed','almost','amount','annual','answer','anyhow','appear','around','attack','august','baker','battle','beauty','became','become','before','behalf','behind','belong','beside','better','beyond','bishop','border','bother','branch','breath','bridge','bright','broken','budget','burden','bureau','button','camera','cancer','carbon','career','castle','caught','centre','chance','change','charge','chosen','church','circle','closed','closer','coffee','colony','colour','column','combat','coming','common','comply','copper','corner','costly','cotton','county','couple','course','covers','create','credit','crisis','custom','damage','danger','dealer','debate','decade','defeat','defend','define','degree','demand','depend','deputy','desert','design','desire','detail','device','differ','dinner','direct','divide','doctor','dollar','domain','double','driven','driver','during','easily','eating','edited','editor','effect','effort','eighth','either','empire','enable','ending','energy','engage','engine','enjoy','enough','ensure','entire','entity','equals','escape','estate','ethnic','evolve','except','expand','expect','expert','export','extend','extent','fabric','facing','factor','failed','fairly','fallen','family','farmer','father','favour','fellow','female','figure','filing','filter','finger','flight','flower','flying','follow','forced','forest','forget','formal','former','foster','fought','fourth','freely','friend','frozen','future','gained','garden','gather','gender','gentle','giving','global','golden','govern','ground','growth','guilty','handle','happen','hardly','having','health','height','helped','hidden','highly','holder','hoping','humble','impact','import','impose','income','indeed','indoor','inform','injury','inland','insert','inside','intent','invest','island','itself','jersey','joined','junior','keeper','launch','lawyer','layout','leader','league','leaves','legacy','length','lesson','lifted','likely','linear','linked','liquid','listen','little','living','locate','longer','looked','losing','lovely','luxury','making','manage','manner','manual','margin','marked','master','matter','medium','member','memory','mental','merely','merger','method','middle','mighty','mining','minute','mirror','mobile','modern','modest','moment','mother','motion','moving','murder','museum','mutual','namely','narrow','nature','nearby','nearly','nobody','normal','notice','notion','number','object','obtain','occupy','offend','office','online','option','orange','origin','others','outfit','output','oxford','packed','palace','parent','partly','patent','patrol','patron','paying','pencil','people','period','permit','person','phrase','picked','pillar','placed','planet','player','please','plenty','pocket','poetry','poison','police','policy','prefer','pretty','prince','prison','profit','proper','proven','public','pursue','raised','random','ranger','rating','reason','recall','recent','record','reduce','reform','region','reject','relate','relief','remain','remote','remove','rental','repair','repeat','report','resign','resist','resort','result','retain','retire','return','reveal','review','reward','riding','robust','ruling','runner','sacred','safety','sample','saving','saying','scheme','school','screen','search','season','second','secret','sector','secure','seeing','select','seller','senior','series','server','settle','severe','sexual','shadow','shared','shelter','shifted','should','signal','signed','silent','silver','simple','simply','singer','single','sister','slight','slowly','smooth','social','socket','solely','source','spirit','spoken','spread','spring','square','stable','status','steady','stolen','stored','strand','stream','street','stress','strict','strike','string','stroke','strong','struck','studio','submit','sudden','suffer','summer','summit','supply','surely','survey','switch','symbol','system','taking','talent','target','temple','tender','terror','thanks','thirty','though','ticket','timber','timing','toward','travel','triple','trying','tunnel','twelve','twenty','typing','unique','united','unless','unlike','unsafe','update','useful','valley','victim','vision','volume','wealth','weapon','weekly','weight','window','winner','winter','within','wonder','wooden','worker','worthy','wright','yellow',
+  // 商业/AI 热门词根
+  'app','api','ai','ml','llm','gpt','bot','dev','web','net','app','biz','pro','vip','lab','hub','app','aiart','aibot','aicpa','aicrm','aidev','aiedu','aigame','ailaw','ailife','aimed','aimap','ainews','aipay','airag','aiseo','aishow','aisoft','aistore','aitech','aivideo'
+]);
+const VOWELS = new Set(['a','e','i','o','u']);
+const SEQ_FORWARD = new Set(['abc','bcd','cde','def','efg','fgh','ghi','hij','ijk','jkl','klm','lmn','mno','nop','opq','pqr','qrs','rst','stu','tuv','uvw','vwx','wxy','xyz']);
+const SEQ_BACKWARD = new Set(['zyx','yxw','xwv','wvu','vut','uts','tsr','srq','rqp','qpo','pon','onm','nml','mlk','lkj','kji','jih','ihg','hgf','gfe','fed','edc','dcb','cba']);
+
+// 溢价原因分析：返回 null（不是溢价）或原因字符串
+// 数据来源参考 Verisign/ICANN 公开溢价规则
+function getPremiumReason(domain) {
+  const base = domain.replace(/\.\w+$/, '').toLowerCase();
+  if (base.length < 2) return null;
+
+  // 1. 1~3 字母：稀缺资源，几乎都是溢价
+  if (base.length <= 3) {
+    if (COMMON_WORDS.has(base)) return '短单词';
+    if (new Set(base).size === 1) return '全相同字母';
+    if (base === base.split('').reverse().join('')) return '回文短域名';
+    return '短域名';
+  }
+
+  // 2. 4 字母：稀缺+模式判断
+  if (base.length === 4) {
+    if (COMMON_WORDS.has(base)) return '英文单词';
+    if (new Set(base).size === 1) return '全相同字母';
+    if (base === base.split('').reverse().join('')) return '回文';
+    if (base.slice(0,2) === base.slice(2,4)) return 'abab重复';
+    if (base[0] === base[1] && base[2] === base[3]) return 'aabb模式';
+    let isSeq = true;
+    for (let i = 1; i < 4; i++) if (base.charCodeAt(i) !== base.charCodeAt(i-1) + 1) { isSeq = false; break; }
+    if (isSeq) return '顺序字母';
+    isSeq = true;
+    for (let i = 1; i < 4; i++) if (base.charCodeAt(i) !== base.charCodeAt(i-1) - 1) { isSeq = false; break; }
+    if (isSeq) return '倒序字母';
+    if ([...base].every(c => VOWELS.has(c))) return '全元音';
+    if ([...base].every(c => !VOWELS.has(c) && c !== 'y')) return '全辅音';
+    return '稀缺4位';
+  }
+
+  // 3. 5 字母：判断是否包含"词根"（aibox = ai+box，aidog = ai+dog）
+  // 检查去掉任意 1~2 个字母前缀后是否为常见单词
+  if (base.length === 5) {
+    if (COMMON_WORDS.has(base)) return '英文单词';
+    // 切掉前 1~2 字母看是否是单词
+    for (let cut = 1; cut <= 2; cut++) {
+      if (COMMON_WORDS.has(base.slice(cut))) return '词根(' + base.slice(cut) + ')';
+      if (COMMON_WORDS.has(base.slice(0, cut) + base.slice(cut + 1))) return '词根变体';
+    }
+    // 末尾 3 字母是常见单词
+    if (COMMON_WORDS.has(base.slice(2))) return '词尾词(' + base.slice(2) + ')';
+    if (COMMON_WORDS.has(base.slice(0, 3))) return '词头词(' + base.slice(0, 3) + ')';
+    if (new Set(base).size === 1) return '全相同字母';
+    if (base === base.split('').reverse().join('')) return '回文';
+    // 顺序/倒序（5位）
+    let isSeq = true;
+    for (let i = 1; i < 5; i++) if (base.charCodeAt(i) !== base.charCodeAt(i-1) + 1) { isSeq = false; break; }
+    if (isSeq) return '顺序字母';
+    isSeq = true;
+    for (let i = 1; i < 5; i++) if (base.charCodeAt(i) !== base.charCodeAt(i-1) - 1) { isSeq = false; break; }
+    if (isSeq) return '倒序字母';
+    if ([...base].every(c => VOWELS.has(c))) return '全元音';
+    if ([...base].every(c => !VOWELS.has(c) && c !== 'y')) return '全辅音';
+    return null;
+  }
+
+  // 4. 6 字母：可包含词根（如 aishop = ai+shop，aigames = ai+games）
+  if (base.length === 6) {
+    if (COMMON_WORDS.has(base)) return '英文单词';
+    if (base.slice(0,3) === base.slice(3,6)) return 'abcabc重复';
+    if (base === base.split('').reverse().join('')) return '回文';
+    // 末尾 3 字母是常见单词（高频判断）
+    if (COMMON_WORDS.has(base.slice(3))) return '词尾词(' + base.slice(3) + ')';
+    if (COMMON_WORDS.has(base.slice(0, 3))) return '词头词(' + base.slice(0, 3) + ')';
+    // 中间 3-4 字母是常见单词
+    for (let start = 0; start <= 2; start++) {
+      if (COMMON_WORDS.has(base.slice(start, start + 3))) return '含词(' + base.slice(start, start + 3) + ')';
+      if (COMMON_WORDS.has(base.slice(start, start + 4))) return '含词(' + base.slice(start, start + 4) + ')';
+    }
+    if (new Set(base).size === 1) return '全相同字母';
+    if ([...base].every(c => VOWELS.has(c))) return '全元音';
+    if ([...base].every(c => !VOWELS.has(c) && c !== 'y')) return '全辅音';
+    return null;
+  }
+
+  // 5. 7 字母
+  if (base.length === 7) {
+    if (COMMON_WORDS.has(base)) return '英文单词';
+    if (COMMON_WORDS.has(base.slice(4))) return '词尾词(' + base.slice(4) + ')';
+    if (COMMON_WORDS.has(base.slice(0, 3))) return '词头词(' + base.slice(0, 3) + ')';
+    if (new Set(base).size === 1) return '全相同字母';
+    return null;
+  }
+  // 6. 8 字母
+  if (base.length === 8) {
+    if (COMMON_WORDS.has(base)) return '英文单词';
+    if (COMMON_WORDS.has(base.slice(5))) return '词尾词(' + base.slice(5) + ')';
+    if (COMMON_WORDS.has(base.slice(0, 3))) return '词头词(' + base.slice(0, 3) + ')';
+    return null;
+  }
+  return null;
+}
+
+// 兼容旧 API
+function isLikelyPremium(domain) {
+  return getPremiumReason(domain) !== null;
+}
+// ======================================
+
+function toggleSuffix(el) {
+  el.classList.toggle('active');
+}
+
+function getSelectedSuffixes() {
+  return [...document.querySelectorAll('.suffix-btn.active')].map(el => el.dataset.suffix);
+}
+
+function buildSuffixGroup() {
+  const group = document.getElementById('suffixGroup');
+  group.innerHTML = '';
+  const defaults = ['com', 'cn'];
+  for (const suffix of AVAILABLE_SUFFIXES) {
+    const btn = document.createElement('div');
+    btn.className = 'suffix-btn' + (defaults.includes(suffix) ? ' active' : '');
+    btn.dataset.suffix = suffix;
+    btn.textContent = `.${suffix}`;
+    btn.title = `RDAP 源: ${RDAP_SOURCES[suffix].length} 个\n${RDAP_SOURCES[suffix].join('\n')}`;
+    btn.onclick = function() { toggleSuffix(this); };
+    group.appendChild(btn);
+  }
+}
+
+document.getElementById('domainLength').oninput = updatePreview;
+document.getElementById('prefixInput').oninput = updatePreview;
+document.getElementById('suffixInput').oninput = updatePreview;
+document.getElementById('letterRange').onchange = updatePreview;
+updatePreview();
+
+function getInputs() {
+  const prefix = document.getElementById('prefixInput').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const suffixCustom = document.getElementById('suffixInput').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const totalLen = parseInt(document.getElementById('domainLength').value) || 3;
+  const letterRange = document.getElementById('letterRange').value;
+  return { prefix, suffixCustom, totalLen, letterRange };
+}
+
+function getAvailableLetters() {
+  const { letterRange } = getInputs();
+  const all = 'abcdefghijklmnopqrstuvwxyz';
+  if (letterRange === 'all') return all;
+  const [from, to] = letterRange.split('-');
+  return all.split('').filter(l => l >= from && l <= to).join('');
+}
+
+function updatePreview() {
+  const { prefix, suffixCustom, totalLen, letterRange } = getInputs();
+  const middleLen = totalLen - prefix.length - suffixCustom.length;
+  const letterCount = letterRange === 'all' ? 26 : letterRange.split('-').reduce((a, _, i, arr) => i === 0 ? 0 : (arr[1].charCodeAt(0) - arr[0].charCodeAt(0) + 1), 0);
+  const preview = document.getElementById('previewLabel');
+  if (middleLen < 1) {
+    preview.textContent = `⚠️ 域名长度过短（前缀+后缀 = ${prefix.length + suffixCustom.length} ≥ ${totalLen}）`;
+    preview.style.color = '#dc2626';
+    return 0;
+  }
+  if (middleLen > 4) {
+    const ex = (letterCount ** middleLen).toExponential(2);
+    preview.textContent = `⚠️ 中间字母数 ${middleLen}，组合数将达 ${ex}。建议拆成两次任务（先 a-m 再 n-z）。`;
+    preview.style.color = '#d97706';
+  } else {
+    const combos = letterCount ** middleLen;
+    const suffixes = getSelectedSuffixes().length;
+    const total = combos * (suffixes || 1);
+    let info = `组合: ${prefix || '(空)'}+${middleLen}位字母+${suffixCustom || '(空)'} (范围 ${letterRange}) = ${combos.toLocaleString()} 个域名`;
+    if (suffixes) info += ` × ${suffixes} 后缀 = ${total.toLocaleString()} 次查询`;
+    preview.textContent = info;
+    preview.style.color = '#4a7cf7';
+  }
+  return letterCount ** middleLen;
+}
+
+function generateMiddleCombos(middleLen) {
+  // 递归生成中间部分的所有字母组合，使用用户选择的字母范围
+  if (middleLen === 0) return [''];
+  const letters = getAvailableLetters();
+  let result = [''];
+  for (let i = 0; i < middleLen; i++) {
+    const newResult = [];
+    for (const prefix of result) {
+      for (const l of letters) {
+        newResult.push(prefix + l);
+      }
+    }
+    result = newResult;
+    if (result.length > 5000000) {
+      throw new Error(`组合数 ${result.length} 超过 500 万上限，请减少长度或缩小字母范围`);
+    }
+  }
+  return result;
+}
+
+// ================== 多源并发查询 ==================
+// 策略：同时打 N 个源，按以下规则判定最终结果
+//   - 收集所有源的响应
+//   - 如果有 ≥1 个源明确返回 200 (taken) -> 最终 taken（最权威）
+//   - 否则如果 ≥1 个源明确返回 404 (available) -> 最终 available
+//   - 否则 (全部失败/网络错误) -> error
+// 这样即使一个服务器挂了/限速，其他源能补上
+async function queryOneSource(url, signal, timeoutMs = 8000) {
+  // 单源带超时查询。直接用 fetch 默认模式，浏览器会自动按 CORS 处理
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('timeout')), timeoutMs)
+  );
+  try {
+    const res = await Promise.race([
+      fetch(url, { signal }),
+      timeout
+    ]);
+    if (signal && signal.aborted) return { ok: false, error: 'aborted' };
+    return { ok: true, status: res.status };
+  } catch (e) {
+    if (e.name === 'AbortError') return { ok: false, error: 'aborted' };
+    return { ok: false, error: e.message || 'net_err' };
+  }
+}
+
+async function queryBackendDomain(domain, suffix, signal) {
+  try {
+    const res = await fetch('/api/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [{ domain, suffix }],
+        workers: parseInt(document.getElementById('concurrency').value) || 5
+      }),
+      signal
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${res.status}`);
+    }
+    const result = payload.results && payload.results[0];
+    if (!result) throw new Error('empty_backend_result');
+    result.checkedAt = result.checked_at || new Date().toLocaleTimeString();
+    return result;
+  } catch (e) {
+    if (e.name === 'AbortError') return null;
+    const full = `${domain}.${suffix}`;
+    return {
+      domain: full,
+      suffix,
+      status: 'error',
+      premium: false,
+      premiumReason: '',
+      method: 'backend_error',
+      detail: e.message || 'backend_error'
+    };
+  }
+}
+
+async function checkOneDomain(domain, suffix, signal) {
+  const full = `${domain}.${suffix}`;
+  if (SERVER_MODE) {
+    return queryBackendDomain(domain, suffix, signal);
+  }
+
+  const sources = RDAP_SOURCES[suffix] || RDAP_SOURCES.com;
+
+  // 阶段1：先用主源（最快响应）快速判定
+  const primary = sources[0];
+  const primaryResult = await queryOneSource(primary + full, signal, 6000);
+
+  // 主源明确返回 404/200 - 直接采纳
+  if (primaryResult.ok && (primaryResult.status === 404 || primaryResult.status === 200)) {
+    return primaryResult.status === 404
+      ? { domain: full, suffix, status: 'available', premium: isLikelyPremium(full), premiumReason: getPremiumReason(full) || '', sources: 1, method: 'primary' }
+      : { domain: full, suffix, status: 'taken', premium: false, premiumReason: '', sources: 1, method: 'primary' };
+  }
+
+  // 主源失败/异常/限速/5xx/其他4xx：并发打所有源做投票
+  const allQueries = sources.map(s => queryOneSource(s + full, signal, 8000));
+  const results = await Promise.all(allQueries);
+
+  const available = results.filter(r => r.ok && r.status === 404);
+  const taken = results.filter(r => r.ok && r.status === 200);
+  const errors = results.filter(r => !r.ok);
+  const nonStandardOk = results.filter(r => r.ok && r.status !== 200 && r.status !== 404);
+
+  // 调试日志：第一次查询时打印到 console 帮用户排错
+  if (!window._loggedSample) {
+    window._loggedSample = true;
+    console.log('[域名查询] 第一次触发多源投票，原始响应:', results.map((r, i) => ({
+      url: sources[i] + full,
+      ok: r.ok,
+      status: r.status,
+      error: r.error
+    })));
+  }
+
+  if (taken.length > 0) {
+    return { domain: full, suffix, status: 'taken', premium: false, sources: results.length, method: 'consensus' };
+  }
+  if (available.length > 0) {
+    return { domain: full, suffix, status: 'available', premium: isLikelyPremium(full), premiumReason: getPremiumReason(full) || '', sources: results.length, method: 'consensus' };
+  }
+
+  // 有非 200/404 的"奇怪"响应：可能是 301/302/3xx 也可能是 5xx，记下来
+  const strangeStatuses = nonStandardOk.map(r => r.status).join(',');
+  if (strangeStatuses) {
+    return { domain: full, suffix, status: 'error', premium: false, sources: results.length, method: 'all_failed', detail: `奇怪状态: ${strangeStatuses}` };
+  }
+  // 全部网络错误
+  return { domain: full, suffix, status: 'error', premium: false, sources: results.length, method: 'all_failed', detail: errors.map(e => e.error).slice(0, 3).join('|') };
+}
+
+// 统一入口：开始 / 暂停 / 继续
+async function toggleStart() {
+  if (!running) {
+    await startCheck();
+  } else if (paused) {
+    resumeCheck();
+  } else {
+    pauseCheck();
+  }
+}
+
+async function startCheck(opts = {}) {
+  const suffixes = getSelectedSuffixes();
+  if (!suffixes.length) { alert('请至少选择一个后缀！'); return; }
+  const { prefix, suffixCustom, totalLen } = getInputs();
+  const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
+  const middleLen = totalLen - prefix.length - suffixCustom.length;
+  if (middleLen < 1) { alert('域名长度必须大于前缀+后缀长度！'); return; }
+  if (middleLen > 4) { if (!confirm(`中间字母数 ${middleLen}，组合数 ${(26 ** middleLen).toExponential(2)}，浏览器可能内存爆掉。建议拆成多次任务（如先 a~m 一半、再 n~z 一半）。\n\n仍要继续吗？`)) return; }
+
+  let combos;
+  try {
+    combos = generateMiddleCombos(middleLen);
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+
+  if (!opts.recheckOnly) {
+    allResults = [];
+    stats = { available: 0, taken: 0, error: 0, premium: 0 };
+    checked = 0;
+    taskIndex = 0;
+    document.getElementById('resultsBody').innerHTML = '';
+  } else {
+    const failed = allResults.filter(r => r.status === 'error');
+    if (!failed.length) { alert('没有失败记录需要重查'); return; }
+    allResults = allResults.filter(r => r.status !== 'error');
+    stats.error = allResults.filter(r => r.status === 'error').length;
+    stats.available = allResults.filter(r => r.status === 'available').length;
+    stats.taken = allResults.filter(r => r.status === 'taken').length;
+    stats.premium = allResults.filter(r => r.premium && r.status === 'available').length;
+    checked = allResults.length;
+    taskQueue = failed.map(r => ({ domain: r.domain.replace(/\.\w+$/, ''), suffix: r.suffix }));
+    taskIndex = 0;
+    total = taskQueue.length;
+    document.getElementById('statusBar').textContent = `正在重查 ${total} 个失败域名...`;
+    startTime = Date.now();
+    running = true;
+    paused = false;
+    controller = new AbortController();
+    updateButtons();
+    document.getElementById('recheckBtn').disabled = true;
+
+    const signal = controller.signal;
+    const workers = Array.from({ length: concurrency }, () => worker(signal));
+    await Promise.all(workers);
+    finishCheck();
+    return;
+  }
+
+  total = combos.length * suffixes.length;
+  startTime = Date.now();
+  running = true;
+  paused = false;
+  controller = new AbortController();
+
+  updateButtons();
+  document.getElementById('exportBtn').disabled = true;
+  document.getElementById('exportAvailBtn').disabled = true;
+  document.getElementById('recheckBtn').disabled = true;
+  updateStats();
+  buildAlphaNav();
+
+  // 生成最终域名 = prefix + middleCombo + suffixCustom
+  taskQueue = [];
+  for (const middle of combos) {
+    const fullName = prefix + middle + suffixCustom;
+    for (const suffix of suffixes) {
+      taskQueue.push({ domain: fullName, suffix });
+    }
+  }
+
+  const signal = controller.signal;
+  const workers = Array.from({ length: concurrency }, () => worker(signal));
+  await Promise.all(workers);
+
+  finishCheck();
+}
+
+function recheckFailed() {
+  startCheck({ recheckOnly: true });
+}
+
+async function worker(signal) {
+  while (taskIndex < taskQueue.length && running && !paused) {
+    const task = taskQueue[taskIndex++];
+    const result = await checkOneDomain(task.domain, task.suffix, signal);
+    if (!result) break;
+    handleResult(result);
+  }
+}
+
+function pauseCheck() {
+  paused = true;
+  updateButtons();
+  document.getElementById('statusBar').textContent = `已暂停，已查询 ${checked} / ${total} 个`;
+}
+
+function resumeCheck() {
+  paused = false;
+  updateButtons();
+  const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
+  const signal = controller.signal;
+  const workers = Array.from({ length: concurrency }, () => worker(signal));
+  Promise.all(workers).then(finishCheck);
+}
+
+function finishCheck() {
+  if (!running) return;
+  if (paused) return; // 还在暂停中，等 resume
+  if (taskIndex < taskQueue.length) return; // 还有任务，等 worker 继续
+
+  running = false;
+  paused = false;
+  updateButtons();
+  document.getElementById('exportBtn').disabled = false;
+  document.getElementById('exportAvailBtn').disabled = false;
+  document.getElementById('recheckBtn').disabled = allResults.filter(r => r.status === 'error').length === 0;
+  const primaryCount = allResults.filter(r => r.method === 'primary').length;
+  const consensusCount = allResults.filter(r => r.method === 'consensus').length;
+  document.getElementById('statusBar').textContent = `查询完成！共 ${total} 个，可注册 ${stats.available} 个（可能溢价 ${stats.premium} 个），已注册 ${stats.taken} 个，失败 ${stats.error} 个 | 主源直查: ${primaryCount}, 多源投票: ${consensusCount}`;
+}
+
+function handleResult(result) {
+  result.checkedAt = new Date().toLocaleTimeString();
+  allResults.push(result);
+  checked++;
+  if (result.status === 'available') {
+    stats.available++;
+    if (result.premium) stats.premium++;
+  } else if (result.status === 'taken') {
+    stats.taken++;
+  } else {
+    stats.error++;
+  }
+  updateStats();
+  updateProgress();
+
+  // 查询进行中时，搜索框有值 → 新结果不要直接插入表格（会覆盖搜索结果）
+  // 改为不插行，数据保留在 allResults 里，用户清空搜索框后会显示
+  const searchInput = document.getElementById('searchInput');
+  const searchActive = searchInput.value.trim();
+  const isRunningQuery = running && !paused;
+  document.getElementById('searchHint').style.display = (searchActive && isRunningQuery) ? 'inline' : 'none';
+
+  if (searchActive && isRunningQuery) {
+    // 搜索中：跳过 prependRow，不更新表格
+    return;
+  }
+
+  if (filterMode === 'all' || filterMode === result.status || (filterMode === 'premium' && result.status === 'available' && result.premium)) {
+    prependRow(result);
+  }
+}
+
+function updateStats() {
+  document.getElementById('statTotal').textContent = checked;
+  document.getElementById('statAvailable').textContent = stats.available;
+  document.getElementById('statPremium').textContent = stats.premium;
+  document.getElementById('statTaken').textContent = stats.taken;
+  document.getElementById('statError').textContent = stats.error;
+  const elapsed = (Date.now() - startTime) / 1000 / 60;
+  const speed = elapsed > 0 ? Math.round(checked / elapsed) : 0;
+  document.getElementById('statSpeed').textContent = speed;
+}
+
+function updateProgress() {
+  const pct = total > 0 ? (checked / total * 100) : 0;
+  document.getElementById('progressBar').style.width = pct.toFixed(1) + '%';
+  document.getElementById('progressPct').textContent = pct.toFixed(1) + '%';
+  const elapsed = (Date.now() - startTime) / 1000;
+  const speed = checked / elapsed;
+  const remaining = speed > 0 ? Math.round((total - checked) / speed) : 0;
+  const etaStr = remaining > 60 ? `${Math.floor(remaining/60)}分${remaining%60}秒` : `${remaining}秒`;
+  document.getElementById('progressEta').textContent = `预计剩余: ${etaStr}`;
+}
+
+function getDisplayStatus(result) {
+  if (result.status === 'available' && result.premium) return 'premium';
+  return result.status;
+}
+
+function prependRow(result) {
+  const tbody = document.getElementById('resultsBody');
+  const displayStatus = getDisplayStatus(result);
+  const badgeMap = { available: 'badge-available', taken: 'badge-taken', error: 'badge-error', checking: 'badge-checking', premium: 'badge-premium' };
+  const statusMap = { available: '✓ 可注册', taken: '✗ 已注册', error: '? 失败', premium: '💎 可能溢价' };
+  const regUrl = `https://wanwang.aliyun.com/domain/searchresult/#/?keyword=${result.domain}&suffix=${result.suffix}`;
+  const methodMap = { primary: '主源', consensus: '投票', all_failed: '全失败', commercial_api_disabled: '商业API禁用', backend_error: '后端错误' };
+  // 详情列：失败显示 detail；可注册/溢价显示溢价原因
+  let detailText = '';
+  if (result.status === 'error') {
+    detailText = result.detail || '';
+  } else if (result.status === 'available' || result.status === 'taken') {
+    detailText = result.premiumReason || (result.method === 'consensus' ? '多源投票' : '');
+  }
+  const priceText = result.price_usd ? ` · $${Number(result.price_usd).toFixed(2)} ${result.currency || ''}` : '';
+  const tr = document.createElement('tr');
+  tr.dataset.status = displayStatus;
+  tr.dataset.domain = result.domain;
+  tr.innerHTML = `
+    <td style="color:#aaa;">${checked}</td>
+    <td style="font-weight:500;font-family:monospace;">${result.domain}</td>
+    <td>.${result.suffix}</td>
+    <td><span class="badge ${badgeMap[displayStatus]||'badge-error'}">${statusMap[displayStatus]||'未知'}</span></td>
+    <td style="color:#9333ea;font-size:11px;">${result.premiumReason || ''}</td>
+    <td style="color:#888;font-size:11px;">${methodMap[result.method]||result.method||''}${priceText} ${result.detail?'· '+result.detail:''}</td>
+    <td style="color:#aaa;">${result.checkedAt}</td>
+    <td>${displayStatus === 'premium' || displayStatus === 'available' ? `<a class="link-small" href="${regUrl}" target="_blank">阿里云复核</a>` : ''}</td>
+  `;
+  tbody.insertBefore(tr, tbody.firstChild);
+  document.getElementById('resultCount').textContent = `共 ${allResults.length} 条`;
+}
+
+function stopCheck() {
+  running = false;
+  paused = false;
+  if (controller) controller.abort();
+  updateButtons();
+  document.getElementById('exportBtn').disabled = false;
+  document.getElementById('exportAvailBtn').disabled = false;
+  document.getElementById('recheckBtn').disabled = allResults.filter(r => r.status === 'error').length === 0;
+  document.getElementById('statusBar').textContent = `已停止，已查询 ${checked} 个`;
+}
+
+function updateButtons() {
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
+  if (!running) {
+    // 未开始 / 已停止
+    startBtn.textContent = '开始查询';
+    startBtn.className = 'btn btn-primary';
+    startBtn.disabled = false;
+    stopBtn.classList.add('hidden');
+  } else if (paused) {
+    // 暂停中
+    startBtn.textContent = '继续查询';
+    startBtn.className = 'btn btn-resume';
+    startBtn.disabled = false;
+    stopBtn.classList.remove('hidden');
+  } else {
+    // 运行中
+    startBtn.textContent = '暂停';
+    startBtn.className = 'btn btn-pause';
+    startBtn.disabled = false;
+    stopBtn.classList.remove('hidden');
+  }
+}
+
+function onSearchInput() {
+  const searchInput = document.getElementById('searchInput');
+  const searchActive = searchInput.value.trim();
+  const isRunningQuery = running && !paused;
+  document.getElementById('searchHint').style.display = (searchActive && isRunningQuery) ? 'inline' : 'none';
+  renderTable();
+}
+
+function setFilter(mode, el) {
+  filterMode = mode;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderTable();
+}
+
+function renderTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const tbody = document.getElementById('resultsBody');
+  tbody.innerHTML = '';
+  const filtered = allResults.filter(r => {
+    const displayStatus = getDisplayStatus(r);
+    if (filterMode !== 'all' && displayStatus !== filterMode) return false;
+    if (alphaFilter) {
+      // 字母筛选作用于主体（去掉后缀部分）
+      const base = r.domain.toLowerCase().replace(/\.\w+$/, '');
+      // 必须以输入的前缀开头，且前缀后下一位是选中的字母
+      const { prefix } = getInputs();
+      const afterPrefix = base.startsWith(prefix) ? base.slice(prefix.length) : base;
+      if (!afterPrefix.startsWith(alphaFilter)) return false;
+    }
+    if (search && !r.domain.toLowerCase().includes(search)) return false;
+    return true;
+  }).reverse();
+
+  document.getElementById('resultCount').textContent = `共 ${filtered.length} 条`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:30px 0;">暂无数据</td></tr>';
+    return;
+  }
+
+  const badgeMap = { available: 'badge-available', taken: 'badge-taken', error: 'badge-error', premium: 'badge-premium' };
+  const statusMap = { available: '✓ 可注册', taken: '✗ 已注册', error: '? 失败', premium: '💎 可能溢价' };
+  const methodMap = { primary: '主源', consensus: '投票', all_failed: '全失败', commercial_api_disabled: '商业API禁用', backend_error: '后端错误' };
+  filtered.slice(0, 500).forEach((result, i) => {
+    const displayStatus = getDisplayStatus(result);
+    const regUrl = `https://wanwang.aliyun.com/domain/searchresult/#/?keyword=${result.domain}&suffix=${result.suffix}`;
+    const priceText = result.price_usd ? ` · $${Number(result.price_usd).toFixed(2)} ${result.currency || ''}` : '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:#aaa;">${i+1}</td>
+      <td style="font-weight:500;font-family:monospace;">${result.domain}</td>
+      <td>.${result.suffix}</td>
+      <td><span class="badge ${badgeMap[displayStatus]||'badge-error'}">${statusMap[displayStatus]||'未知'}</span></td>
+      <td style="color:#9333ea;font-size:11px;">${result.premiumReason || ''}</td>
+      <td style="color:#888;font-size:11px;">${methodMap[result.method]||result.method||''}${priceText} ${result.detail?'· '+result.detail:''}</td>
+      <td style="color:#aaa;">${result.checkedAt}</td>
+      <td>${displayStatus === 'premium' || displayStatus === 'available' ? `<a class="link-small" href="${regUrl}" target="_blank">阿里云复核</a>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  if (filtered.length > 500) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="8" style="text-align:center;color:#aaa;padding:12px 0;">仅显示前 500 条，请使用搜索框筛选或导出全部数据</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function buildAlphaNav() {
+  const nav = document.getElementById('alphaNav');
+  nav.innerHTML = '<span style="font-size:12px;color:#666;margin-right:4px;">字母筛选：</span>';
+  const allBtn = document.createElement('div');
+  allBtn.className = 'alpha-btn';
+  allBtn.textContent = '全部';
+  allBtn.onclick = () => { alphaFilter = ''; renderTable(); };
+  nav.appendChild(allBtn);
+  for (const l of 'abcdefghijklmnopqrstuvwxyz') {
+    const btn = document.createElement('div');
+    btn.className = 'alpha-btn';
+    btn.textContent = l;
+    btn.onclick = () => { alphaFilter = l; renderTable(); };
+    nav.appendChild(btn);
+  }
+}
+
+function exportCSV() {
+  if (!allResults.length) return;
+  const header = 'domain,suffix,status,premium,premiumReason,price_usd,currency,method,detail,checkedAt\n';
+  const rows = allResults.map(r => [
+    r.domain, r.suffix, r.status, r.premium ? 'yes' : 'no',
+    r.premiumReason || '', r.price_usd || '', r.currency || '',
+    r.method || '', r.detail || '', r.checkedAt || ''
+  ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = `domain_results_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function exportAvailable() {
+  const available = allResults.filter(r => r.status === 'available');
+  if (!available.length) { alert('暂无可注册域名'); return; }
+  const content = available.map(r => `${r.domain}${r.premium?' [可能溢价]':''}`).join('\n');
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = `available_domains_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+async function diagCORS() {
+  const result = document.getElementById('corsResult');
+  result.innerHTML = '⏳ 正在测试 3 个 RDAP 服务器...';
+  const tests = [
+    { name: 'Verisign (.com)', url: 'https://rdap.verisign.com/com/v1/domain/google.com' },
+    { name: 'IANA', url: 'https://rdap.iana.org/domain/google.com' },
+    { name: 'rdap.org', url: 'https://rdap.org/domain/google.com' },
+  ];
+  const lines = [];
+  for (const t of tests) {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(t.url);
+      lines.push(`✅ ${t.name}: HTTP ${r.status} (${Date.now()-t0}ms)`);
+    } catch (e) {
+      lines.push(`❌ ${t.name}: ${e.message} (${Date.now()-t0}ms) <span style="color:#dc2626;">[CORS 拦截]</span>`);
+    }
+  }
+  const failedCount = lines.filter(l => l.includes('❌')).length;
+  if (failedCount === 0) {
+    result.innerHTML = `<strong style="color:#16a34a;">🎉 全部通过！</strong> 当前浏览器可以正常查询 RDAP。<br>${lines.join('<br>')}`;
+  } else if (failedCount === tests.length) {
+    result.innerHTML = `<strong style="color:#dc2626;">⚠️ 全部失败</strong> — 当前浏览器 CORS 完全拦截外部 RDAP（这在 WorkBuddy 内置浏览器中是已知限制）。<br>${lines.join('<br>')}<br><br><strong>解决：</strong>点击"在 Edge 中打开"按钮，会用 Edge 打开本工具。`;
+  } else {
+    result.innerHTML = `<strong style="color:#d97706;">⚠️ 部分失败</strong> — 当前浏览器 CORS 限制了一些源。<br>${lines.join('<br>')}`;
+  }
+}
+
+function openInEdge() {
+  // 取当前 HTML 文件的真实路径，调起 Edge 打开
+  const path = window.location.pathname.replace(/^\//, '').replace(/\//g, '\\');
+  const fileUrl = 'file:///' + path;
+  // 在 Windows 上用 msedge.exe 打开
+  const cmd = `start msedge "${fileUrl}"`;
+  // 通过隐藏的 exec 方式触发
+  try {
+    // 优先用 window.open
+    window.open(fileUrl, '_blank');
+  } catch (e) {
+    result.innerHTML += `<br>Edge 启动失败: ${e.message}`;
+  }
+}
+
+buildSuffixGroup();
+buildAlphaNav();
+if (SERVER_MODE) {
+  document.getElementById('corsDiag').style.display = 'none';
+  document.getElementById('openInEdgeBtn').style.display = 'none';
+  document.getElementById('statusBar').textContent = '服务器模式：查询请求将发送到 /api/check';
+}
+</script>
+</body>
+</html>
