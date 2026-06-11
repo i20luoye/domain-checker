@@ -1096,12 +1096,15 @@ function createRow(entry){
   const timeStr = formatRelativeTime(entry.checked_at);
   if(timeStr) tr.title = '查询于 ' + timeStr;
 
+  const reasonText = entry.status === 'error' ? (entry.detail || '查询失败') : entry.premiumReason;
+  const reasonColor = entry.status === 'error' ? '#ef4444' : '#64748b';
+
   tr.innerHTML = `
     <td>${entry.index}</td>
     <td class="domain-cell">${escapeHtml(domainBase)}</td>
     <td class="tld-cell">.${escapeHtml(entry.suffix)}</td>
     <td><span class="badge ${badgeClass[entry.status]||'badge-error'}">${statusText[entry.status]||entry.status}</span></td>
-    <td style="color:#64748b;font-size:12px">${escapeHtml(entry.premiumReason)}</td>
+    <td style="color:${reasonColor};font-size:12px">${escapeHtml(reasonText)}</td>
     <td>${methodHTML}</td>
     <td>${confHTML}</td>
     <td><div class="action-links">${actionHTML}</div></td>`;

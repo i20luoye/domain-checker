@@ -13,16 +13,31 @@ DNS 预筛漏斗 — 在 RDAP/WHOIS 查询前先查 DNS
 import socket
 
 
+try:
+    import dns.resolver
+    HAS_DNSPYTHON = True
+except ImportError:
+    HAS_DNSPYTHON = False
+
+
 def has_dns_record(domain: str) -> bool:
-    """快速判断域名是否有 DNS 记录（IPv4 A 记录 + IPv6 AAAA 记录）
-
-    Args:
-        domain: 完整域名，如 'google.com'
-
-    Returns:
-        True  — 有 DNS 记录 → 大概率已注册（可减少不必要的外部查询）
-        False — 无 DNS 记录 → 可能未注册，需要 RDAP/WHOIS 进一步确认
+    """快速判断域名是否有 DNS 记录
+    如果安装了 dnspython，优先查询 SOA 记录，这可以过滤出几乎所有已注册域名（包括停放、无 A 记录的域名）。
     """
+    if HAS_DNSPYTHON:
+        try:
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 1.5
+            resolver.lifetime = 1.5
+            resolver.resolve(domain, 'SOA')
+            return True
+        except dns.resolver.NXDOMAIN:
+            return False
+        except (dns.resolver.NoNameservers, dns.resolver.NoAnswer):
+            return True
+        except Exception:
+            pass
+
     # 查 A 记录（IPv4）
     try:
         socket.getaddrinfo(domain, 0, socket.AF_INET, socket.SOCK_STREAM)

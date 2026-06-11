@@ -89,7 +89,7 @@ async def _query_rdap_items(items, workers):
     """RDAP 查询（带 DNS 预筛 + 指数退避重试）
 
     流程：
-      1. DNS 预筛（5ms）：有 DNS 记录 → 直接标"已注册"，跳过 RDAP
+      1. 并发 DNS 预筛：有 DNS 记录 → 直接标"已注册"，跳过 RDAP
       2. RDAP 查询（带重试）：无 DNS 记录 → 走 RDAP，失败自动重试
     """
     semaphore = asyncio.Semaphore(workers)
@@ -99,23 +99,32 @@ async def _query_rdap_items(items, workers):
         "Accept": "application/json",
     }
 
-    # 第 1 步：DNS 预筛
-    dns_hits = []
-    rdap_items = []
-    for item in items:
+    # 第 1 步：并发 DNS 预筛
+    async def _async_dns_check(item):
         domain = item["domain"]
         try:
-            if dns_prefilter.has_dns_record(domain):
-                result = domain_checker._mk_result(
+            # 异步执行同步的 has_dns_record 检查，避免阻塞主线程事件循环
+            has_record = await asyncio.to_thread(dns_prefilter.has_dns_record, domain)
+            if has_record:
+                return domain_checker._mk_result(
                     domain, "taken", False, "",
                     "dns",
                     "DNS 预筛（有 A/AAAA 记录）",
                 )
-                dns_hits.append(result)
-                continue
         except Exception:
             pass
-        rdap_items.append(item)
+        return item
+
+    dns_tasks = [_async_dns_check(item) for item in items]
+    dns_results = await asyncio.gather(*dns_tasks)
+
+    dns_hits = []
+    rdap_items = []
+    for res in dns_results:
+        if isinstance(res, dict) and res.get("status") == "taken":
+            dns_hits.append(res)
+        else:
+            rdap_items.append(res)
 
     # 第 2 步：RDAP 查询剩余域名（无 DNS 记录的）
     rdap_results = []

@@ -370,30 +370,38 @@ def dns_prefilter_check_sync(domain: str, timeout_sec=DNS_PREFILTER_TIMEOUT) -> 
     """DNS 预筛：本地拦截已注册域名
 
     Returns:
-        {"ok": True, "registered": True, "method": "dns_a"}      # 有 DNS 记录 → 已注册
+        {"ok": True, "registered": True, "method": "dns_soa"}      # 有 DNS 记录 → 已注册
         {"ok": True, "registered": False, "method": "no_dns"}     # 无 DNS 记录 → 需 RDAP 进一步证实
         {"ok": False, "error": "..."}                              # DNS 查询失败（罕见）
     """
+    # 步骤 1：优先查 SOA 记录
+    try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = timeout_sec
+        resolver.lifetime = timeout_sec
+        resolver.resolve(domain, 'SOA')
+        return {"ok": True, "registered": True, "method": "dns_soa"}
+    except ImportError:
+        pass
+    except dns.resolver.NXDOMAIN:
+        return {"ok": True, "registered": False, "method": "no_dns"}
+    except (dns.resolver.NoNameservers, dns.resolver.NoAnswer):
+        return {"ok": True, "registered": True, "method": "dns_soa_err"}
+    except Exception:
+        pass
+
+    # 步骤 2：查 A 记录（IPv4）
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(timeout_sec)
     try:
-        # 步骤 1：查 A 记录（IPv4）
         if _dns_check_one(domain):
             return {"ok": True, "registered": True, "method": "dns_a"}
-        # 步骤 2：查 AAAA 记录（IPv6）
+        # 步骤 3：查 AAAA 记录（IPv6）
         try:
             socket.getaddrinfo(domain, None, socket.AF_INET6, socket.SOCK_STREAM)
             return {"ok": True, "registered": True, "method": "dns_aaaa"}
         except socket.gaierror:
-            pass
-        # 步骤 3：查 MX 记录（邮件服务器 — 兜底，部分域名 A 记录为空但有 MX）
-        try:
-            import dns.resolver  # type: ignore  # 可选依赖 dnspython
-            dns.resolver.resolve(domain, 'MX', lifetime=timeout_sec)
-            return {"ok": True, "registered": True, "method": "dns_mx"}
-        except ImportError:
-            pass  # dnspython 未安装
-        except Exception:
             pass
         # 全部无记录 → 疑似可注册
         return {"ok": True, "registered": False, "method": "no_dns"}
