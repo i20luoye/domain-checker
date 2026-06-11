@@ -357,11 +357,59 @@ DNS_PREFILTER_TIMEOUT = 1.5  # 单次 DNS 查询超时（秒）
 DNS_PREFILTER_ENABLED = True
 
 
+def is_fake_or_private_ip(ip: str) -> bool:
+    """快速判断是否是内网/局域网IP、回环IP或 Clash 默认假 IP 范围 (198.18.0.0/15)"""
+    if not ip:
+        return True
+    
+    # IPv4 检查
+    if "." in ip:
+        if ip.startswith("127."):
+            return True
+        if ip.startswith("198.18.") or ip.startswith("198.19."):
+            return True
+        if ip.startswith("10."):
+            return True
+        if ip.startswith("192.168."):
+            return True
+        if ip.startswith("169.254."):
+            return True
+        if ip.startswith("172."):
+            try:
+                parts = ip.split('.')
+                if len(parts) >= 2:
+                    second_octet = int(parts[1])
+                    if 16 <= second_octet <= 31:
+                        return True
+            except ValueError:
+                pass
+        if ip == "0.0.0.0":
+            return True
+            
+    # IPv6 检查
+    elif ":" in ip:
+        ip_lower = ip.lower()
+        if ip_lower == "::1" or ip_lower == "0:0:0:0:0:0:0:1":
+            return True
+        # ULA 局域网独有地址 (fc00::/7)
+        if ip_lower.startswith("fc") or ip_lower.startswith("fd"):
+            return True
+        # 链路本地地址 (fe80::/10)
+        if ip_lower.startswith("fe8") or ip_lower.startswith("fe9") or ip_lower.startswith("fea") or ip_lower.startswith("feb"):
+            return True
+            
+    return False
+
+
 def _dns_check_one(domain: str) -> bool:
     """检查域名是否有 A 记录。返回 True = 有 DNS 记录 → 大概率已注册"""
     try:
-        socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
-        return True
+        info = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
+        for item in info:
+            ip = item[4][0]
+            if not is_fake_or_private_ip(ip):
+                return True
+        return False
     except socket.gaierror:
         return False
 
@@ -387,7 +435,8 @@ def dns_prefilter_check_sync(domain: str, timeout_sec=DNS_PREFILTER_TIMEOUT) -> 
     except dns.resolver.NXDOMAIN:
         return {"ok": True, "registered": False, "method": "no_dns"}
     except (dns.resolver.NoNameservers, dns.resolver.NoAnswer):
-        return {"ok": True, "registered": True, "method": "dns_soa_err"}
+        # Clash 拦截 SOA 导致 NoNameservers / NoAnswer 时 pass 降级到 A/AAAA，防假阳性
+        pass
     except Exception:
         pass
 
@@ -399,8 +448,15 @@ def dns_prefilter_check_sync(domain: str, timeout_sec=DNS_PREFILTER_TIMEOUT) -> 
             return {"ok": True, "registered": True, "method": "dns_a"}
         # 步骤 3：查 AAAA 记录（IPv6）
         try:
-            socket.getaddrinfo(domain, None, socket.AF_INET6, socket.SOCK_STREAM)
-            return {"ok": True, "registered": True, "method": "dns_aaaa"}
+            info = socket.getaddrinfo(domain, None, socket.AF_INET6, socket.SOCK_STREAM)
+            has_real_ip = False
+            for item in info:
+                ip = item[4][0]
+                if not is_fake_or_private_ip(ip):
+                    has_real_ip = True
+                    break
+            if has_real_ip:
+                return {"ok": True, "registered": True, "method": "dns_aaaa"}
         except socket.gaierror:
             pass
         # 全部无记录 → 疑似可注册
@@ -1189,9 +1245,21 @@ async def godaddy_batch_query(domains: list, timeout_sec=20) -> dict:
 
 def _mk_result(domain: str, status: str, premium: bool, reason: str,
                method: str, detail: str = "",
-               price_usd: float = "", currency: str = "") -> dict:
+               price_usd: float = "", currency: str = "",
+               confidence: str = None, is_whois: bool = None,
+               sources_ok: int = None, sources_total: int = None) -> dict:
     """构造标准结果 dict（统一字段）"""
-    return {
+    # 自动推断 is_whois
+    if is_whois is None:
+        is_whois = "whois" in method or "whois" in detail
+        
+    # 自动推断 sources_ok / sources_total
+    if sources_ok is None:
+        sources_ok = 0 if status == "error" else 1
+    if sources_total is None:
+        sources_total = 1
+
+    res = {
         "domain": domain,
         "suffix": domain.rsplit(".", 1)[-1] if "." in domain else "",
         "status": status,
@@ -1202,7 +1270,17 @@ def _mk_result(domain: str, status: str, premium: bool, reason: str,
         "price_usd": price_usd,
         "currency": currency,
         "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "is_whois": is_whois,
+        "sources_ok": sources_ok,
+        "sources_total": sources_total,
     }
+    
+    if confidence is None:
+        res["confidence"] = score_confidence(res)
+    else:
+        res["confidence"] = confidence
+        
+    return res
 
 
 # ================== JSON 导入（GoDaddy 用） ==================
@@ -1411,6 +1489,10 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         "method": "all_failed",
         "detail": "",
         "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "is_whois": False,
+        "sources_ok": 0,
+        "sources_total": len(sources),
+        "confidence": "LOW",
     }
 
     # ============ Stage 0: DNS 预筛（5ms 本地拦截）============
@@ -1419,6 +1501,10 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         if dns_res.get("ok") and dns_res.get("registered"):
             result["status"] = "taken"
             result["method"] = f"dns_prefilter({dns_res.get('method', '?')})"
+            result["is_whois"] = False
+            result["sources_ok"] = 1
+            result["sources_total"] = len(sources)
+            result["confidence"] = score_confidence(result)
             return result
 
     # ============ Stage 1: 主源快速判定（带重试）============
@@ -1429,15 +1515,24 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         return await query_one_source(session, primary + full_domain, semaphore, timeout_sec=6)
 
     primary_res = await query_with_retry(_primary_query, max_retries=2)
+    is_whois_primary = primary.startswith("whois://")
     if primary_res["ok"] and primary_res["status"] == 404:
         result["status"] = "available"
         result["premium"] = is_likely_premium(full_domain)
         result["premiumReason"] = get_premium_reason(full_domain) or ""
         result["method"] = "primary"
+        result["is_whois"] = is_whois_primary
+        result["sources_ok"] = 1
+        result["sources_total"] = len(sources)
+        result["confidence"] = score_confidence(result)
         return result
     if primary_res["ok"] and primary_res["status"] == 200:
         result["status"] = "taken"
         result["method"] = "primary"
+        result["is_whois"] = is_whois_primary
+        result["sources_ok"] = 1
+        result["sources_total"] = len(sources)
+        result["confidence"] = score_confidence(result)
         return result
 
     # ============ Stage 2: 多源并发投票（带重试）============
@@ -1454,6 +1549,10 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     errors = [r for r in responses if not r["ok"]]
     strange = [r for r in responses if r["ok"] and r["status"] not in (200, 404)]
 
+    result["is_whois"] = any(s.startswith("whois://") for s in sources)
+    result["sources_total"] = len(sources)
+    result["sources_ok"] = len(available) + len(taken) + len(strange)
+
     if taken:
         result["status"] = "taken"
         result["method"] = "consensus"
@@ -1469,6 +1568,7 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         else:
             result["detail"] = "|".join(e["error"] for e in errors[:3])
 
+    result["confidence"] = score_confidence(result)
     return result
 
 

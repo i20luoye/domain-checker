@@ -20,6 +20,50 @@ except ImportError:
     HAS_DNSPYTHON = False
 
 
+def is_fake_or_private_ip(ip: str) -> bool:
+    """快速判断是否是内网/局域网IP、回环IP或 Clash 默认假 IP 范围 (198.18.0.0/15)"""
+    if not ip:
+        return True
+    
+    # IPv4 检查
+    if "." in ip:
+        if ip.startswith("127."):
+            return True
+        if ip.startswith("198.18.") or ip.startswith("198.19."):
+            return True
+        if ip.startswith("10."):
+            return True
+        if ip.startswith("192.168."):
+            return True
+        if ip.startswith("169.254."):
+            return True
+        if ip.startswith("172."):
+            try:
+                parts = ip.split('.')
+                if len(parts) >= 2:
+                    second_octet = int(parts[1])
+                    if 16 <= second_octet <= 31:
+                        return True
+            except ValueError:
+                pass
+        if ip == "0.0.0.0":
+            return True
+            
+    # IPv6 检查
+    elif ":" in ip:
+        ip_lower = ip.lower()
+        if ip_lower == "::1" or ip_lower == "0:0:0:0:0:0:0:1":
+            return True
+        # ULA 局域网独有地址 (fc00::/7)
+        if ip_lower.startswith("fc") or ip_lower.startswith("fd"):
+            return True
+        # 链路本地地址 (fe80::/10)
+        if ip_lower.startswith("fe8") or ip_lower.startswith("fe9") or ip_lower.startswith("fea") or ip_lower.startswith("feb"):
+            return True
+            
+    return False
+
+
 def has_dns_record(domain: str) -> bool:
     """快速判断域名是否有 DNS 记录
     如果安装了 dnspython，优先查询 SOA 记录，这可以过滤出几乎所有已注册域名（包括停放、无 A 记录的域名）。
@@ -34,21 +78,37 @@ def has_dns_record(domain: str) -> bool:
         except dns.resolver.NXDOMAIN:
             return False
         except (dns.resolver.NoNameservers, dns.resolver.NoAnswer):
-            return True
+            # Clash 拦截 SOA 可能导致 NoNameservers / NoAnswer。
+            # 这里应 pass 降级让 A/AAAA 检查（能过滤 fake-ip）及后续 RDAP 验证，杜绝假阳性。
+            pass
         except Exception:
             pass
 
     # 查 A 记录（IPv4）
     try:
-        socket.getaddrinfo(domain, 0, socket.AF_INET, socket.SOCK_STREAM)
-        return True
+        info = socket.getaddrinfo(domain, 0, socket.AF_INET, socket.SOCK_STREAM)
+        has_real_ip = False
+        for item in info:
+            ip = item[4][0]
+            if not is_fake_or_private_ip(ip):
+                has_real_ip = True
+                break
+        if has_real_ip:
+            return True
     except socket.gaierror:
         pass
 
     # 查 AAAA 记录（IPv6）
     try:
-        socket.getaddrinfo(domain, 0, socket.AF_INET6, socket.SOCK_STREAM)
-        return True
+        info = socket.getaddrinfo(domain, 0, socket.AF_INET6, socket.SOCK_STREAM)
+        has_real_ip = False
+        for item in info:
+            ip = item[4][0]
+            if not is_fake_or_private_ip(ip):
+                has_real_ip = True
+                break
+        if has_real_ip:
+            return True
     except socket.gaierror:
         pass
 
@@ -56,18 +116,7 @@ def has_dns_record(domain: str) -> bool:
 
 
 def has_dns_detailed(domain: str) -> dict:
-    """详细的 DNS 检查，返回每条记录的状态
-
-    Returns:
-        {
-            "has_a": True/False,
-            "has_aaaa": True/False,
-            "has_mx": True/False,
-            "has_ns": True/False,
-            "a_records": ["1.2.3.4", ...],
-            "any": True/False,    # 有任何记录？
-        }
-    """
+    """详细的 DNS 检查，返回每条记录的状态"""
     result = {
         "has_a": False,
         "has_aaaa": False,
@@ -81,16 +130,20 @@ def has_dns_detailed(domain: str) -> dict:
     try:
         info = socket.getaddrinfo(domain, 0, socket.AF_INET, socket.SOCK_STREAM)
         ips = list(set(item[4][0] for item in info))
-        if ips:
+        real_ips = [ip for ip in ips if not is_fake_or_private_ip(ip)]
+        if real_ips:
             result["has_a"] = True
-            result["a_records"] = ips[:5]  # 最多保留 5 个
+            result["a_records"] = real_ips[:5]  # 最多保留 5 个
     except socket.gaierror:
         pass
 
     # AAAA 记录
     try:
-        socket.getaddrinfo(domain, 0, socket.AF_INET6, socket.SOCK_STREAM)
-        result["has_aaaa"] = True
+        info = socket.getaddrinfo(domain, 0, socket.AF_INET6, socket.SOCK_STREAM)
+        ips = list(set(item[4][0] for item in info))
+        real_ips = [ip for ip in ips if not is_fake_or_private_ip(ip)]
+        if real_ips:
+            result["has_aaaa"] = True
     except socket.gaierror:
         pass
 

@@ -943,6 +943,15 @@ async function processQueue(){
         body:JSON.stringify({domains:batch}),
         signal:controller.signal
       });
+      if(!response.ok){
+        let msg = `HTTP ${response.status}`;
+        if(response.status === 502) msg = `网关错误 (HTTP 502)`;
+        else if(response.status === 504) msg = `网关超时 (HTTP 504)`;
+        else if(response.status === 503) msg = `服务不可用 (HTTP 503)`;
+        else if(response.status === 500) msg = `服务器内部错误 (HTTP 500)`;
+        else if(response.status === 429) msg = `请求过多/被限流 (HTTP 429)`;
+        throw new Error(msg);
+      }
       const data = await response.json();
       if(data.results){
         for(const result of data.results){
@@ -1154,7 +1163,7 @@ function nextPage(){
 
 function createRow(entry){
   const tr = document.createElement('tr');
-  const showLinks = entry.status === 'available' || entry.status === 'premium' || entry.status === 'error';
+  const showLinks = true;
   const domainBase = entry.domain.split('.').slice(0,-1).join('.');
 
   let actionHTML = '';
