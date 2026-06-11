@@ -64,6 +64,33 @@ def is_fake_or_private_ip(ip: str) -> bool:
     return False
 
 
+_dns_hijacked = None
+
+
+def is_dns_hijacked() -> bool:
+    """动态探测本地 DNS 是否存在通配符劫持 (ISP 劫持或 Clash 假 IP 且无法用 is_fake_or_private_ip 彻底过滤)"""
+    global _dns_hijacked
+    if _dns_hijacked is not None:
+        return _dns_hijacked
+        
+    import uuid
+    # 随机生成一个绝对不存在的域名
+    random_domain = f"detect-nxdomain-{uuid.uuid4().hex[:12]}.com"
+    try:
+        info = socket.getaddrinfo(random_domain, 0, socket.AF_INET, socket.SOCK_STREAM)
+        has_real_ip = False
+        for item in info:
+            ip = item[4][0]
+            if not is_fake_or_private_ip(ip):
+                has_real_ip = True
+                break
+        _dns_hijacked = has_real_ip
+    except Exception:
+        _dns_hijacked = False
+        
+    return _dns_hijacked
+
+
 def has_dns_record(domain: str) -> bool:
     """快速判断域名是否有 DNS 记录
     如果安装了 dnspython，优先查询 SOA 记录，这可以过滤出几乎所有已注册域名（包括停放、无 A 记录的域名）。
@@ -83,6 +110,10 @@ def has_dns_record(domain: str) -> bool:
             pass
         except Exception:
             pass
+
+    # 如果 DNS 发生劫持（NXDOMAIN 被返回非私有公网 IP），则 A/AAAA 检查不可信，直接判定为没有 DNS 记录，回退到 RDAP/WHOIS
+    if is_dns_hijacked():
+        return False
 
     # 查 A 记录（IPv4）
     try:
@@ -125,6 +156,9 @@ def has_dns_detailed(domain: str) -> dict:
         "a_records": [],
         "any": False,
     }
+
+    if is_dns_hijacked():
+        return result
 
     # A 记录
     try:

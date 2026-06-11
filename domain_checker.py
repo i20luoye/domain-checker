@@ -198,16 +198,6 @@ def get_premium_reason(domain: str) -> str:
             return "全相同字母"
         if base == base[::-1]:
             return "回文"
-        # 顺序/倒序 5 位
-        if is_seq_forward(base):
-            return "顺序字母"
-        if is_seq_backward(base):
-            return "倒序字母"
-        if all(c in VOWELS for c in base):
-            return "全元音"
-        # 5 字符全辅音也算可疑（如 "qzqxq"、"rhyth"）
-        if all(c not in VOWELS and c != "y" for c in base):
-            return "全辅音5"
         return None
 
     # 6 字母：可包含词根（aishop = ai+shop，aigames = ai+games）
@@ -401,8 +391,37 @@ def is_fake_or_private_ip(ip: str) -> bool:
     return False
 
 
+_dns_hijacked = None
+
+
+def is_dns_hijacked() -> bool:
+    """动态探测本地 DNS 是否存在通配符劫持 (ISP 劫持或 Clash 假 IP 且无法用 is_fake_or_private_ip 彻底过滤)"""
+    global _dns_hijacked
+    if _dns_hijacked is not None:
+        return _dns_hijacked
+        
+    import uuid
+    # 随机生成一个绝对不存在的域名
+    random_domain = f"detect-nxdomain-{uuid.uuid4().hex[:12]}.com"
+    try:
+        info = socket.getaddrinfo(random_domain, None, socket.AF_INET, socket.SOCK_STREAM)
+        has_real_ip = False
+        for item in info:
+            ip = item[4][0]
+            if not is_fake_or_private_ip(ip):
+                has_real_ip = True
+                break
+        _dns_hijacked = has_real_ip
+    except Exception:
+        _dns_hijacked = False
+        
+    return _dns_hijacked
+
+
 def _dns_check_one(domain: str) -> bool:
     """检查域名是否有 A 记录。返回 True = 有 DNS 记录 → 大概率已注册"""
+    if is_dns_hijacked():
+        return False
     try:
         info = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
         for item in info:
@@ -439,6 +458,10 @@ def dns_prefilter_check_sync(domain: str, timeout_sec=DNS_PREFILTER_TIMEOUT) -> 
         pass
     except Exception:
         pass
+
+    # 如果 DNS 发生劫持（NXDOMAIN 被返回非私有公网 IP），则 A/AAAA 检查不可信，直接判定为没有 DNS 记录，回退到 RDAP/WHOIS
+    if is_dns_hijacked():
+        return {"ok": True, "registered": False, "method": "no_dns"}
 
     # 步骤 2：查 A 记录（IPv4）
     old_timeout = socket.getdefaulttimeout()
@@ -1081,8 +1104,11 @@ async def query_with_retry(query_func, max_retries=DEFAULT_MAX_RETRIES, backoff_
         if not result.get("ok"):
             # 失败：根据错误类型决定是否重试
             error = result.get("error", "")
-            # 网络类错误：timeout / client_err / connection_reset → 重试
-            if any(kw in error.lower() for kw in ("timeout", "client_err", "connection", "reset")):
+            # 超时直接返回，不作任何重试，避免拖慢查询速度造成 Nginx 504 Gateway Timeout
+            if "timeout" in error.lower():
+                return result
+            # 网络类错误：client_err / connection_reset → 重试
+            if any(kw in error.lower() for kw in ("client_err", "connection", "reset")):
                 if attempt < max_retries:
                     wait = backoff_base ** attempt
                     await asyncio.sleep(wait)
@@ -1511,8 +1537,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     primary = sources[0]
     async def _primary_query():
         if primary.startswith("whois://"):
-            return await query_one_source(session, primary + "/" + full_domain, semaphore, timeout_sec=6)
-        return await query_one_source(session, primary + full_domain, semaphore, timeout_sec=6)
+            return await query_one_source(session, primary + "/" + full_domain, semaphore, timeout_sec=5)
+        return await query_one_source(session, primary + full_domain, semaphore, timeout_sec=3)
 
     primary_res = await query_with_retry(_primary_query, max_retries=2)
     is_whois_primary = primary.startswith("whois://")
@@ -1538,8 +1564,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     # ============ Stage 2: 多源并发投票（带重试）============
     async def _one_source(s):
         if s.startswith("whois://"):
-            return await query_one_source(session, s + "/" + full_domain, semaphore)
-        return await query_one_source(session, s + full_domain, semaphore)
+            return await query_one_source(session, s + "/" + full_domain, semaphore, timeout_sec=5)
+        return await query_one_source(session, s + full_domain, semaphore, timeout_sec=3)
 
     tasks = [query_with_retry(lambda s=s: _one_source(s), max_retries=2) for s in sources]
     responses = await asyncio.gather(*tasks)

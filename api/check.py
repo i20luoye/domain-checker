@@ -353,10 +353,6 @@ def get_premium_reason(domain: str) -> str | None:
         if base[:3] in COMMON_WORDS: return f"词头词({base[:3]})"
         if is_same: return "全相同字母"
         if is_palindrome: return "回文"
-        if is_ascending: return "顺序字母"
-        if is_descending: return "倒序字母"
-        if is_all_vowels: return "全元音"
-        if is_all_consonants: return "全辅音"
         return None
 
     if L == 6:
