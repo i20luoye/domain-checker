@@ -486,10 +486,6 @@ td:first-child{color:#64748b;font-size:12px}
       <label for="inputConcurrent">并发批次</label>
       <input type="number" id="inputConcurrent" value="3" min="1" max="8">
     </div>
-    <div class="field">
-      <label for="inputBatchSize">每批数量</label>
-      <input type="number" id="inputBatchSize" value="50" min="5" max="500">
-    </div>
     <div class="preview-label" id="previewLabel">
       <span>📊</span> 组合: <strong id="previewText">ai + 3位字母 = 17,576 个 × 2 后缀 = 35,152 次查询</strong>
     </div>
@@ -685,8 +681,6 @@ let filterMode = 'all';
 let alphaFilter = '';
 let searchQuery = '';
 let stats = {available:0,taken:0,error:0,premium:0};
-let batchSize = 10;
-let workBatchSize = 10;
 let concurrent = 3;
 let speedInterval = null;
 let lastChecked = 0;
@@ -869,8 +863,6 @@ async function startCheck(){
   const suffix = $('inputSuffix').value.trim().toLowerCase();
   const letters = getAvailableLetters();
   const tlds = getActiveTlds();
-  batchSize = Math.max(5,Math.min(500,parseInt($('inputBatchSize').value)||50));
-  workBatchSize = Math.min(batchSize, SAFE_API_BATCH_SIZE);
   concurrent = Math.max(1,Math.min(8,parseInt($('inputConcurrent').value)||3));
 
   if(!tlds.length){alert('请至少选择一个 TLD');return;}
@@ -948,8 +940,8 @@ function finishCheck(){
 // ── Queue Worker ──
 async function processQueue(){
   while(queueIndex < taskQueue.length && running && !paused){
-    const batch = taskQueue.slice(queueIndex, queueIndex + workBatchSize);
-    queueIndex += workBatchSize;
+    const batch = taskQueue.slice(queueIndex, queueIndex + SAFE_API_BATCH_SIZE);
+    queueIndex += SAFE_API_BATCH_SIZE;
 
     try{
       const results = await sendBatchWithSplitRetry(batch);

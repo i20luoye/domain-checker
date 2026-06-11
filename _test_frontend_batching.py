@@ -9,8 +9,13 @@ HTML = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
 class FrontendBatchingTests(unittest.TestCase):
     def test_api_requests_are_capped_independently_from_user_batch_size(self):
         self.assertIn("SAFE_API_BATCH_SIZE", HTML)
-        self.assertIn("slice(queueIndex, queueIndex + workBatchSize)", HTML)
+        self.assertIn("slice(queueIndex, queueIndex + SAFE_API_BATCH_SIZE)", HTML)
         self.assertIn("sendBatchWithSplitRetry(batch)", HTML)
+
+    def test_manual_batch_size_control_is_removed(self):
+        self.assertNotIn("inputBatchSize", HTML)
+        self.assertNotIn("let batchSize", HTML)
+        self.assertNotIn("workBatchSize", HTML)
 
     def test_gateway_timeout_retries_by_splitting_batch(self):
         self.assertIn("isGatewayTimeout", HTML)
