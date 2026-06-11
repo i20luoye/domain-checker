@@ -1619,6 +1619,27 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
 
             if verify_res and verify_res.get("ok") and verify_res["status"] == 200:
                 # RDAP 确认已注册 → 双源一致，置信度高
+                # 但如果域名匹配溢价模式，额外用 GoDaddy 公共端点确认
+                # （RDAP 200 也可能是"溢价值/待售"，不是真已注册）
+                if is_likely_premium(full_domain) and tld != "cn":
+                    try:
+                        gd_res = await godaddy_public_batch_query([full_domain], timeout_sec=6)
+                        gd_data = gd_res.get(full_domain.lower()) if isinstance(gd_res, dict) else None
+                        if gd_data and gd_data.get("ok") and gd_data.get("available"):
+                            # GoDaddy 说可注册 → 推翻 RDAP 结论，是溢价域名
+                            result["status"] = "available"
+                            result["premium"] = True
+                            result["premiumReason"] = gd_data.get("premium_reason", "GoDaddy 一口价")
+                            result["method"] = f"godaddypublic_premium({dns_res.get('method', '?')})"
+                            result["is_whois"] = False
+                            result["sources_ok"] = 1
+                            result["sources_total"] = len(sources)
+                            result["confidence"] = "HIGH"
+                            result["detail"] = f"RDAP 返回 200 但 GoDaddy 公共端点确认可注册（溢价域名）"
+                            return result
+                    except Exception:
+                        pass
+
                 result["status"] = "taken"
                 result["method"] = f"dns_prefilter({dns_res.get('method', '?')})+rdap_verify"
                 result["is_whois"] = is_whois_primary
@@ -1629,6 +1650,32 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
 
             if verify_res and verify_res.get("ok") and verify_res["status"] == 404:
                 # RDAP 404 → 推翻 DNS 预筛结论，域名其实可注册（DNS 劫持/通配）
+                # ⚠️ .cn 特例：CNNIC whois 可能返回 "未找到" 但域名实际已注册
+                # 此时 DNS 预筛（SOA/A记录）比 whois 更可靠
+                if tld == "cn":
+                    # 对 .cn 做二次确认：检查 A 记录是否有真实 IP
+                    import socket as _socket
+                    try:
+                        _info = _socket.getaddrinfo(full_domain, 0, _socket.AF_INET, _socket.SOCK_STREAM)
+                        _real_ips = [item[4][0] for item in _info
+                                     if item[4][0] and not item[4][0].startswith(("127.", "10.", "192.168.", "198.18.", "198.19.", "169.254.", "0."))]
+                        if not _real_ips:
+                            _real_ips = []
+                    except Exception:
+                        _real_ips = []
+
+                    if _real_ips:
+                        # 有真实 IP + whois 说可用 → whois 很可能是错的
+                        result["status"] = "taken"
+                        result["method"] = f"dns_prefilter+whois_conflict(cn)"
+                        result["is_whois"] = True
+                        result["sources_ok"] = 1
+                        result["sources_total"] = len(sources)
+                        result["confidence"] = "LOW"
+                        result["detail"] = f"DNS 有 A 记录（{_real_ips[0]}）但 whois 返回未找到，选择相信 DNS"
+                        return result
+
+                # 非 .cn 或 .cn 无 A 记录 → 正常走 DNS 劫持路径
                 result["status"] = "available"
                 result["method"] = f"dns_prefilter_dns_hijack({dns_res.get('method', '?')})"
                 result["premium"] = is_likely_premium(full_domain)
