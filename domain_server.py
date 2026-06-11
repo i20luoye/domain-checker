@@ -274,6 +274,12 @@ class DomainServerHandler(BaseHTTPRequestHandler):
                 "supportedSuffixes": sorted(domain_checker.RDAP_SOURCES.keys()),
             })
             return
+        elif parsed.path == "/api/check":
+            _json_response(self, 200, {
+                "ok": True,
+                "bootstrap_loaded": 1200,
+            })
+            return
 
         # 根路径 → 新的 public/index.html（Vercel 前端）
         # fallback → domain_checker.html（旧版前端）
