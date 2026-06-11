@@ -1566,13 +1566,12 @@ async def godaddy_public_batch_query(domains: list, timeout_sec=GODADDY_PUBLIC_T
 
 
 async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dict:
-    """Provider 抽象层查询一个域名（DNS 预筛 → RDAP 多源 → WHOIS → GoDaddy）
+    """Provider 抽象层查询一个域名（DNS 预筛 → RDAP 多源 → WHOIS）
 
     优先级链（参考 beast-domain-checker）：
     1. DNS 预筛（5ms）→ 有 DNS 记录直接判 taken
     2. RDAP 多源投票（首选，免费，覆盖 1200+ TLD）
     3. WHOIS 端口 43（备选，免费，用于 .cn 等 IANA 路由不准的 TLD）
-    4. GoDaddy 公共端点（可选，增强溢价检测）
 
     所有 HTTP/RDAP 查询走 query_with_retry() 自动重试
     """
@@ -1595,8 +1594,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     # ============ Stage 0: DNS 预筛（5ms 本地拦截）============
     # 重要：DNS 预筛命中后必须走 RDAP 二次验证，
     # 因为公共 DNS 常有 wildcard catch-all（广告 IP）会污染"已注册"判定。
-    # 根因修复：RDAP 二次验证失败时**降级到 GoDaddy 公共端点**确认
-    # 不再直接 taken（aiadx.com/aiaGo.com 误判案例）
+    # 根因修复：RDAP 二次验证失败时不要直接 taken，也不要依赖商业/公共注册商端点。
+    # 改为查询所有免费权威源，仍无结论才标记为 error/需复核。
     if DNS_PREFILTER_ENABLED:
         dns_res = await dns_prefilter_check(full_domain, DNS_PREFILTER_TIMEOUT)
         if dns_res.get("ok") and dns_res.get("registered"):
@@ -1619,27 +1618,6 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
 
             if verify_res and verify_res.get("ok") and verify_res["status"] == 200:
                 # RDAP 确认已注册 → 双源一致，置信度高
-                # 但如果域名匹配溢价模式，额外用 GoDaddy 公共端点确认
-                # （RDAP 200 也可能是"溢价值/待售"，不是真已注册）
-                if is_likely_premium(full_domain) and tld != "cn":
-                    try:
-                        gd_res = await godaddy_public_batch_query([full_domain], timeout_sec=6)
-                        gd_data = gd_res.get(full_domain.lower()) if isinstance(gd_res, dict) else None
-                        if gd_data and gd_data.get("ok") and gd_data.get("available"):
-                            # GoDaddy 说可注册 → 推翻 RDAP 结论，是溢价域名
-                            result["status"] = "available"
-                            result["premium"] = True
-                            result["premiumReason"] = gd_data.get("premium_reason", "GoDaddy 一口价")
-                            result["method"] = f"godaddypublic_premium({dns_res.get('method', '?')})"
-                            result["is_whois"] = False
-                            result["sources_ok"] = 1
-                            result["sources_total"] = len(sources)
-                            result["confidence"] = "HIGH"
-                            result["detail"] = f"RDAP 返回 200 但 GoDaddy 公共端点确认可注册（溢价域名）"
-                            return result
-                    except Exception:
-                        pass
-
                 result["status"] = "taken"
                 result["method"] = f"dns_prefilter({dns_res.get('method', '?')})+rdap_verify"
                 result["is_whois"] = is_whois_primary
@@ -1687,38 +1665,39 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 result["detail"] = f"DNS 显示有记录但 RDAP 404（疑似 DNS 劫持）：{dns_res.get('method', '?')}"
                 return result
 
-            # ===== 第二步：RDAP 失败/超时/5xx → 降级到 GoDaddy 公共端点 =====
-            # 这是修复"已注册"误判的核心：aiadx.com / aiago.com 实际是"待售"状态
-            # RDAP 给的不是 200 也不是 404，无法判断 → 交给 GoDaddy 公共端点
-            try:
-                gd_res = await godaddy_public_batch_query([full_domain], timeout_sec=8)
-                gd_data = gd_res.get(full_domain.lower()) if isinstance(gd_res, dict) else None
-                if gd_data and gd_data.get("ok"):
-                    if gd_data.get("available"):
-                        # GoDaddy 确认：域名可注册（一口价/溢价/标准）
-                        # 注意：status 统一用"available"，溢价信息放 premium 字段
-                        result["status"] = "available"
-                        result["method"] = f"godaddypublic_recover(dns_soa)"
-                        result["premium"] = bool(gd_data.get("premium"))
-                        result["premiumReason"] = "GoDaddy 一口价" if gd_data.get("premium") else ""
-                        result["is_whois"] = False
-                        result["sources_ok"] = 1
-                        result["sources_total"] = len(sources)
-                        result["confidence"] = "HIGH"
-                        result["detail"] = f"RDAP 验证失败（{verify_res.get('error', '?') if verify_res else 'timeout'}），GoDaddy 公共端点确认可注册"
-                        return result
-                    else:
-                        # GoDaddy 确认：域名已注册
-                        result["status"] = "taken"
-                        result["method"] = f"godaddypublic_verify(dns_soa)"
-                        result["is_whois"] = False
-                        result["sources_ok"] = 1
-                        result["sources_total"] = len(sources)
-                        result["confidence"] = "HIGH"
-                        result["detail"] = f"RDAP 验证失败，GoDaddy 公共端点确认已注册"
-                        return result
-            except Exception:
-                pass
+            # ===== 第二步：主源失败/超时/5xx → 免费多源验证 =====
+            async def _verify_one_source(s):
+                if s.startswith("whois://"):
+                    return await query_one_source(session, s + "/" + full_domain, semaphore, timeout_sec=8 if tld == "cn" else 5)
+                return await query_one_source(session, s + full_domain, semaphore, timeout_sec=5)
+
+            verify_tasks = [query_with_retry(lambda s=s: _verify_one_source(s), max_retries=2) for s in sources]
+            verify_responses = await asyncio.gather(*verify_tasks)
+            verify_available = [r for r in verify_responses if r.get("ok") and r.get("status") == 404]
+            verify_taken = [r for r in verify_responses if r.get("ok") and r.get("status") == 200]
+            verify_errors = [r for r in verify_responses if not r.get("ok")]
+
+            if verify_taken:
+                result["status"] = "taken"
+                result["method"] = f"dns_prefilter({dns_res.get('method', '?')})+rdap_consensus"
+                result["is_whois"] = any(s.startswith("whois://") for s in sources)
+                result["sources_ok"] = len(verify_taken)
+                result["sources_total"] = len(sources)
+                result["confidence"] = score_confidence(result)
+                result["detail"] = "DNS 预筛命中，免费权威源复核为已注册"
+                return result
+
+            if verify_available:
+                result["status"] = "available"
+                result["method"] = f"dns_prefilter_dns_hijack({dns_res.get('method', '?')})+rdap_consensus"
+                result["premium"] = is_likely_premium(full_domain)
+                result["premiumReason"] = get_premium_reason(full_domain) or ""
+                result["is_whois"] = any(s.startswith("whois://") for s in sources)
+                result["sources_ok"] = len(verify_available)
+                result["sources_total"] = len(sources)
+                result["confidence"] = score_confidence(result)
+                result["detail"] = "DNS 显示有记录，但免费权威源返回可注册（疑似 DNS 劫持/通配解析）"
+                return result
 
             # ===== 第三步：所有源都失败 → 标 error 不标 taken =====
             # 这是关键：不直接降级为 taken，否则会误判"待售"为"已注册"
@@ -1728,7 +1707,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
             result["sources_ok"] = 0
             result["sources_total"] = len(sources)
             result["confidence"] = "LOW"
-            result["detail"] = f"RDAP 验证失败且 GoDaddy 兜底失败：{verify_res.get('error', '?') if verify_res else 'timeout'}"
+            error_summary = "|".join((e.get("error", "?") for e in verify_errors[:3])) or (verify_res.get("error", "?") if verify_res else "timeout")
+            result["detail"] = f"免费权威源均无明确结论，需复核：{error_summary}"
             return result
 
     # ============ Stage 1: 主源快速判定（带重试）============
@@ -2352,6 +2332,13 @@ def score_confidence(result: dict) -> str:
             if status == "taken":
                 return CONFIDENCE_HIGH
             return CONFIDENCE_HIGH
+        # DNS 预筛 + 免费多源复核成功
+        if "+rdap_consensus" in method:
+            if status == "available":
+                return CONFIDENCE_VERY_HIGH
+            if status == "taken":
+                return CONFIDENCE_HIGH
+            return CONFIDENCE_LOW
         # DNS 预筛命中但 RDAP 验证失败（保留 taken 降级）
         if "unverified" in method:
             if status == "taken":
@@ -2360,7 +2347,9 @@ def score_confidence(result: dict) -> str:
         # DNS 预筛 + RDAP 404（DNS 劫持推翻）
         if "dns_hijack" in method:
             if status == "available":
-                return CONFIDENCE_LOW  # DNS 不可信，但 RDAP 404 = 权威
+                if "+rdap_consensus" in method:
+                    return CONFIDENCE_VERY_HIGH
+                return CONFIDENCE_HIGH  # RDAP 404 = 权威，DNS 记录可能来自通配/劫持
             return CONFIDENCE_LOW
         # 旧版单源 DNS 预筛（没经过修复的代码路径）
         if status == "available":

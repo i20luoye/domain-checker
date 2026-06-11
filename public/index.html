@@ -508,7 +508,7 @@ td:first-child{color:#64748b;font-size:12px}
         <span>⏹</span> 停止
       </button>
       <button class="btn btn-indigo" id="btnRecheck" onclick="recheckFailed()" disabled>
-        <span>🔄</span> 重查失败
+        <span>🔄</span> 重查需复核
       </button>
       <button class="btn btn-green" id="btnExportCSV" onclick="exportCSV()" disabled>
         <span>📥</span> 导出 CSV
@@ -540,7 +540,7 @@ td:first-child{color:#64748b;font-size:12px}
   </div>
   <div class="glass stat-card amber" id="statError">
     <div class="stat-number" id="statErrorNum">0</div>
-    <div class="stat-label">查询失败</div>
+    <div class="stat-label">需复核</div>
   </div>
   <div class="glass stat-card cyan" id="statSpeed">
     <div class="stat-number" id="statSpeedNum">0</div>
@@ -565,7 +565,7 @@ td:first-child{color:#64748b;font-size:12px}
       <span class="filter-pill" data-filter="available" onclick="setFilter('available',this)">仅可注册</span>
       <span class="filter-pill" data-filter="premium" onclick="setFilter('premium',this)">可能溢价</span>
       <span class="filter-pill" data-filter="taken" onclick="setFilter('taken',this)">已注册</span>
-      <span class="filter-pill" data-filter="error" onclick="setFilter('error',this)">失败</span>
+      <span class="filter-pill" data-filter="error" onclick="setFilter('error',this)">需复核</span>
     </div>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="搜索域名…" oninput="onSearchInput()">
@@ -617,7 +617,6 @@ td:first-child{color:#64748b;font-size:12px}
 const AVAILABLE_TLDS = ['com','cn','net','org','io','ai','app','dev'];
 const MAX_DISPLAY = 100000;
 const ALIYUN_URL = 'https://wanwang.aliyun.com/domain/searchresult/#/?keyword=';
-const GODADDY_URL = 'https://www.godaddy.com/domainsearch/find?domainToCheck=';
 
 const COMMON_WORDS = new Set([
   'the','be','to','of','and','in','that','have','it','for','not','on','with','he','as','you',
@@ -644,8 +643,8 @@ const COMMON_WORDS = new Set([
 ]);
 
 const badgeClass = {available:'badge-available',taken:'badge-taken',error:'badge-error',premium:'badge-premium'};
-const statusText = {available:'✓ 可注册',taken:'✗ 已注册',error:'? 失败',premium:'💎 可能溢价'};
-const methodText = {primary:'主源直查',fallback:'备用源',all_failed:'全失败'};
+const statusText = {available:'✓ 可注册',taken:'✗ 已注册',error:'? 需复核',premium:'💎 可能溢价'};
+const methodText = {primary:'主源直查',fallback:'备用源',all_failed:'全源无结论'};
 const confText = {VERY_HIGH:'极高',HIGH:'高',MEDIUM:'中',LOW:'低'};
 const confColor = {VERY_HIGH:'conf-VERY_HIGH',HIGH:'conf-HIGH',MEDIUM:'conf-MEDIUM',LOW:'conf-LOW'};
 
@@ -657,6 +656,20 @@ function formatRelativeTime(unix){
   if(diff < 3600) return Math.floor(diff/60) + '分钟前';
   if(diff < 86400) return Math.floor(diff/3600) + '小时前';
   return Math.floor(diff/86400) + '天前';
+}
+
+function getMethodLabel(method){
+  if(!method) return '';
+  if(methodText[method]) return methodText[method];
+  if(method.includes('+rdap_consensus')) return '免费多源复核';
+  if(method.includes('+rdap_verify')) return 'DNS+权威复核';
+  if(method.includes('dns_hijack')) return '权威源推翻DNS';
+  if(method.startsWith('verify_failed')) return '免费源需复核';
+  if(method.startsWith('dns_prefilter')) return 'DNS预筛';
+  if(method.startsWith('consensus')) return '多源投票';
+  if(method.startsWith('rdap_failed')) return 'RDAP无结论';
+  if(method === 'fetch_error') return '请求失败';
+  return method;
 }
 
 // ── State ──
@@ -1168,14 +1181,13 @@ function createRow(entry){
 
   let actionHTML = '';
   if(showLinks){
-    actionHTML = `<a class="action-link" href="${ALIYUN_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">阿里云</a>
-      <a class="action-link" href="${GODADDY_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">GoDaddy</a>`;
+    actionHTML = `<a class="action-link" href="${ALIYUN_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">阿里云复核</a>`;
   }
 
   // 来源标签：附加 sources_ok/total 和 WHOIS 标识
   // 优先使用后端返回的 method_cn，没有再降级到 methodText
   let methodHTML = '';
-  const methodBase = entry.method_cn || methodText[entry.method] || escapeHtml(entry.method);
+  const methodBase = entry.method_cn || getMethodLabel(entry.method);
   const sourcesCount = entry.sources_total > 0
     ? ` <span style="color:#64748b;font-size:10px">${entry.sources_ok}/${entry.sources_total}</span>`
     : '';
@@ -1190,7 +1202,7 @@ function createRow(entry){
   const timeStr = formatRelativeTime(entry.checked_at);
   if(timeStr) tr.title = '查询于 ' + timeStr;
 
-  const reasonText = entry.status === 'error' ? (entry.detail || '查询失败') : entry.premiumReason;
+  const reasonText = entry.status === 'error' ? (entry.detail || '需复核') : entry.premiumReason;
   const reasonColor = entry.status === 'error' ? '#ef4444' : '#64748b';
 
   tr.innerHTML = `
@@ -1278,7 +1290,7 @@ function getTimestamp(){
 // ── Recheck Failed ──
 async function recheckFailed(){
   const failed = allResults.filter(r=>r.status==='error');
-  if(!failed.length){alert('没有失败的查询');return;}
+  if(!failed.length){alert('没有需要复核的查询');return;}
 
   // Remove old failed entries
   allResults = allResults.filter(r=>r.status!=='error');

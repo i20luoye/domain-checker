@@ -71,34 +71,21 @@ python domain_checker.py --source rdap --prefix ai --length 7 --suffix com --let
 | `status` | available / taken / error | available |
 | `premium` | 是否命中启发式溢价规则 | True / False |
 | `premiumReason` | 启发式原因 | 短域名 / 词根(box) |
-| `method` | 查询方法 | primary / consensus / whois / godaddypublic / rdap |
-| `price_usd` | GoDaddy 真实报价（仅 godaddy/godaddypublic 源能返回） | 12.99 |
+| `method` | 查询方法 | primary / consensus / whois / dns_prefilter |
+| `confidence` | 置信度 | VERY_HIGH / HIGH / MEDIUM / LOW |
 
-## 多 Provider 故障转移链路
+## 免费权威源链路
 
-当某个数据源失败（限流、网络错误）时，自动切到下一个。支持 6 个数据源：
+默认部署只使用免费公开协议：
 
-| Provider | 限速 | 真实价格 | 溢价检测 | 备注 |
-|---|---|---|---|---|
-| `rdap` | 视各 TLD 服务器 | ❌ | 启发式 | 默认首选，零配置 |
-| `godaddypublic` | 30 req/min | ❌ | 真实信号 ⭐ | 无需 Key，公共 MCP 端点 |
-| `porkbun` | - | ✅ | 真实 | 需 `PORKBUN_KEY`/`PORKBUN_SECRET` |
-| `domainr` | 10k/月 (RapidAPI) | 部分 | 部分 | 需 `DOMAINR_RAPIDAPI_KEY` |
-| `whoisfreaks` | 500 免费 credits | ✅ | 真实 | 需 `WHOISFREAKS_KEY` |
-| `botoi` | 5 req/min, 100 req/day | ❌ | 不可靠 ⚠️ | 免 Key，后端 RDAP 经常盲报 |
+| 链路 | 用途 | 准确性说明 |
+|---|---|---|
+| DNS 预筛 | 快速识别大量已注册域名 | 只能预筛，不能单独作为最终结论 |
+| RDAP 主源 | `.com/.net/.org/.app/.dev/.ai` 等权威查询 | `404` 可视为高置信可注册，`200` 可视为已注册 |
+| RDAP 多源复核 | 主源超时或 DNS 预筛冲突时使用 | 免费源多源投票，降低误判 |
+| WHOIS 43 | `.cn/.com.cn` 等 RDAP 不稳定后缀 | 可用但网络上偶发 reset，失败时标“需复核” |
 
-### 用法
-
-```bash
-# 默认链路（按优先级依次尝试）
-python domain_checker.py --source chain --prefix ai --length 7 --suffix com
-
-# 自定义链路
-python domain_checker.py --source chain --providers rdap,godaddypublic,porkbun \
-    --prefix ai --length 7 --suffix com
-```
-
-熔断规则：连续 5 次错误 → 30 秒冷却；限流 → 60 秒冷却；冷却期间自动跳过该 provider。
+如果免费权威源都没有明确结论，结果会标为 `error`，前端显示为“需复核”，不会硬判为可注册或已注册。
 
 ## TLD 预设 + 置信度评分
 
@@ -123,10 +110,10 @@ python domain_checker.py --prefix ai --length 5 --suffix com --with-confidence
 | `all` | IANA 全部 1200+ TLD |
 
 置信度等级：
-- **VERY_HIGH**：RDAP 404 确认可注册 / DNS 有记录确认已注册
-- **HIGH**：RDAP 200（已注册）/ 商业 API 返回
-- **MEDIUM**：仅 DNS 预筛 / WHOIS 端口 43 / 多源失败但 DNS 无记录
-- **LOW**：所有数据源都失败
+- **VERY_HIGH**：RDAP 404 确认可注册 / 免费多源复核可注册
+- **HIGH**：RDAP 200 确认已注册 / DNS + RDAP 双重确认
+- **MEDIUM**：WHOIS 端口 43 或单源结果
+- **LOW**：免费源无明确结论，需要人工复核
 
 ## 关于溢价域名
 
@@ -137,7 +124,7 @@ python domain_checker.py --prefix ai --length 5 --suffix com --with-confidence
 如果你的目标是给客户大量免费查询，建议展示为：
 
 ```text
-可注册 / 已注册 / 查询失败 / 可能溢价（需人工复核）
+可注册 / 已注册 / 需复核 / 可能溢价（需人工复核）
 ```
 
 不要承诺“真实价格”或“准确溢价价格”。
