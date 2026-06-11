@@ -563,7 +563,6 @@ td:first-child{color:#64748b;font-size:12px}
     <div class="filter-pills" id="filterPills">
       <span class="filter-pill active" data-filter="all" onclick="setFilter('all',this)">全部</span>
       <span class="filter-pill" data-filter="available" onclick="setFilter('available',this)">仅可注册</span>
-      <span class="filter-pill" data-filter="premium" onclick="setFilter('premium',this)">可能溢价</span>
       <span class="filter-pill" data-filter="taken" onclick="setFilter('taken',this)">已注册</span>
       <span class="filter-pill" data-filter="error" onclick="setFilter('error',this)">需复核</span>
     </div>
@@ -642,8 +641,8 @@ const COMMON_WORDS = new Set([
   'go','ok','no','hi','up','my','us','me','do','so','ox','ax'
 ]);
 
-const badgeClass = {available:'badge-available',taken:'badge-taken',error:'badge-error',premium:'badge-premium'};
-const statusText = {available:'✓ 可注册',taken:'✗ 已注册',error:'? 需复核',premium:'💎 可能溢价'};
+const badgeClass = {available:'badge-available',taken:'badge-taken',error:'badge-error'};
+const statusText = {available:'✓ 可注册',taken:'✗ 已注册',error:'? 需复核'};
 const methodText = {primary:'主源直查',fallback:'备用源',all_failed:'全源无结论'};
 const confText = {VERY_HIGH:'极高',HIGH:'高',MEDIUM:'中',LOW:'低'};
 const confColor = {VERY_HIGH:'conf-VERY_HIGH',HIGH:'conf-HIGH',MEDIUM:'conf-MEDIUM',LOW:'conf-LOW'};
@@ -985,9 +984,10 @@ async function processQueue(){
 
 // ── Result Handler ──
 function handleResult(result){
-  // Determine display status
+  // Premium is a tag on available domains, not a separate status bucket.
   let displayStatus = result.status;
   let premiumReason = result.premiumReason || '';
+  let isPremium = false;
   if(result.status === 'available'){
     // Client-side premium check
     const parts = result.domain.split('.');
@@ -995,12 +995,11 @@ function handleResult(result){
     const base = parts.join('.');
     const premCheck = isPremiumDomain(base, tld);
     if(result.premium || premCheck.premium){
-      displayStatus = 'premium';
+      isPremium = true;
       premiumReason = result.premiumReason || premCheck.reason;
       stats.premium++;
-    } else {
-      stats.available++;
     }
+    stats.available++;
   } else if(result.status === 'taken'){
     stats.taken++;
   } else {
@@ -1012,6 +1011,7 @@ function handleResult(result){
     domain: result.domain,
     suffix: result.suffix || result.domain.split('.').pop(),
     status: displayStatus,
+    premium: isPremium,
     premiumReason: premiumReason,
     method: result.method || '',
     detail: result.detail || '',
@@ -1019,6 +1019,8 @@ function handleResult(result){
     is_whois: !!result.is_whois,
     sources_ok: result.sources_ok || 0,
     sources_total: result.sources_total || 0,
+    verification_rounds: result.verification_rounds || result.sources_total || 1,
+    verification_detail: result.verification_detail || '',
     checked_at: result.checked_at || 0
   };
   allResults.push(entry);
@@ -1202,14 +1204,21 @@ function createRow(entry){
   const timeStr = formatRelativeTime(entry.checked_at);
   if(timeStr) tr.title = '查询于 ' + timeStr;
 
-  const reasonText = entry.status === 'error' ? (entry.detail || '需复核') : entry.premiumReason;
+  const premiumTag = entry.premium
+    ? ` <span class="badge badge-premium" title="启发式标签，最终价格以注册商为准">可能溢价</span>`
+    : '';
+  const statusBadge = `<span class="badge ${badgeClass[entry.status]||'badge-error'}">${statusText[entry.status]||entry.status}</span>${premiumTag}`;
+  const reviewRounds = entry.status === 'error' && entry.verification_rounds
+    ? `（已核查${entry.verification_rounds}轮）`
+    : '';
+  const reasonText = entry.status === 'error' ? ((entry.detail || '需复核') + reviewRounds) : entry.premiumReason;
   const reasonColor = entry.status === 'error' ? '#ef4444' : '#64748b';
 
   tr.innerHTML = `
     <td>${entry.index}</td>
     <td class="domain-cell">${escapeHtml(domainBase)}</td>
     <td class="tld-cell">.${escapeHtml(entry.suffix)}</td>
-    <td><span class="badge ${badgeClass[entry.status]||'badge-error'}">${statusText[entry.status]||entry.status}</span></td>
+    <td>${statusBadge}</td>
     <td style="color:${reasonColor};font-size:12px">${escapeHtml(reasonText)}</td>
     <td>${methodHTML}</td>
     <td>${confHTML}</td>
@@ -1259,7 +1268,7 @@ function exportCSV(){
 }
 
 async function exportAvailable(){
-  const avail = allResults.filter(r=>r.status==='available'||r.status==='premium');
+  const avail = allResults.filter(r=>r.status==='available');
   if(!avail.length){alert('没有可注册的域名');return;}
   const verified = await verifyAvailableBeforeExport(avail);
   if(!verified.length){alert('导出前复核后，没有可确认注册的域名');return;}
@@ -1303,12 +1312,13 @@ async function verifyAvailableBeforeExport(rows){
         const tld = parts.pop();
         const base = parts.join('.');
         const premCheck = isPremiumDomain(base, tld);
-        const status = (result.premium || premCheck.premium) ? 'premium' : 'available';
+        const isPremium = !!(result.premium || premCheck.premium);
         verified.push({
           index: verified.length + 1,
           domain: result.domain,
           suffix: result.suffix || tld,
-          status,
+          status: 'available',
+          premium: isPremium,
           premiumReason: result.premiumReason || (premCheck.premium ? premCheck.reason : ''),
           method: result.method || '',
           method_cn: result.method_cn || '',
@@ -1316,6 +1326,8 @@ async function verifyAvailableBeforeExport(rows){
           is_whois: !!result.is_whois,
           sources_ok: result.sources_ok || 0,
           sources_total: result.sources_total || 0,
+          verification_rounds: result.verification_rounds || result.sources_total || 1,
+          verification_detail: result.verification_detail || '',
           checked_at: result.checked_at || Math.floor(Date.now()/1000)
         });
       }
@@ -1394,7 +1406,7 @@ function updateUI_stopped(){
   $('btnStop').classList.add('hidden');
   $('btnRecheck').disabled = stats.error === 0;
   $('btnExportCSV').disabled = allResults.length === 0;
-  $('btnExportAvail').disabled = (stats.available + stats.premium) === 0;
+  $('btnExportAvail').disabled = stats.available === 0;
   $('statsGrid').classList.remove('pulsing');
   document.querySelectorAll('#configCard input, #configCard select').forEach(el=>el.disabled=false);
 }

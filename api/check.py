@@ -438,6 +438,8 @@ class CheckResult:
     confidence: ConfidenceType = CONF_LOW
     sources_ok: int = 0
     sources_total: int = 0
+    verification_rounds: int = 0
+    verification_detail: str = ""
     is_whois: bool = False
     checked_at: float = field(default_factory=time.time)
 
@@ -448,6 +450,7 @@ class CheckResult:
 def make_result(domain: str, suffix: str, status: StatusType, method: MethodType,
                 detail: str = "", premium_reason: Optional[str] = None,
                 sources_ok: int = 0, sources_total: int = 0,
+                verification_rounds: int = 0, verification_detail: str = "",
                 is_whois: bool = False,
                 confidence: Optional[ConfidenceType] = None) -> CheckResult:
     """统一构造 CheckResult，自动根据 status/sources 推断 confidence"""
@@ -464,6 +467,8 @@ def make_result(domain: str, suffix: str, status: StatusType, method: MethodType
         confidence=confidence,
         sources_ok=sources_ok,
         sources_total=sources_total,
+        verification_rounds=verification_rounds or sources_total or 1,
+        verification_detail=verification_detail or detail,
         is_whois=is_whois,
     )
 
@@ -491,59 +496,143 @@ def score_confidence(status: str, sources_ok: int, sources_total: int, is_whois:
 # 核心查询逻辑
 # ---------------------------------------------------------------------------
 
+def split_domain_suffix(domain: str) -> tuple[str, str]:
+    """拆分域名主体和后缀，优先识别 .com.cn 这类二级公共后缀。"""
+    labels = domain.rsplit(".", 2)
+    if len(labels) == 3:
+        base2, second, tld = labels
+        suffix2 = f"{second}.{tld}"
+        if suffix2 in FALLBACK_RDAP_SOURCES or suffix2 in _bootstrap_cache:
+            return base2, suffix2
+    parts = domain.rsplit(".", 1)
+    if len(parts) != 2:
+        return domain, ""
+    return parts[0], parts[1]
+
+
+def summarize_source_results(results: list[tuple[str, int]]) -> str:
+    labels = []
+    for idx, (_, code) in enumerate(results, 1):
+        if code == 200:
+            status = "taken"
+        elif code == 404:
+            status = "available"
+        else:
+            status = "failed"
+        labels.append(f"第{idx}轮:{status}")
+    return "；".join(labels)
+
 def check_domain(domain: str) -> CheckResult:
     """查询单个域名：先主源、失败时并发回退"""
     domain = domain.strip().lower()
-    parts = domain.rsplit(".", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
+    base, suffix = split_domain_suffix(domain)
+    if not base or not suffix:
         return make_result(domain, "", "error", "all_failed", "域名格式无效")
 
-    base, suffix = parts
     sources = get_rdap_sources(suffix)
     premium_reason = get_premium_reason(domain)
     is_whois = bool(sources and sources[0].startswith("whois://"))
+    source_results: list[tuple[str, int]] = []
 
     # 步骤 1：主源
     primary = query_single_source(domain, sources[0])
+    source_results.append((sources[0], primary))
     if primary == 404:
-        return make_result(domain, suffix, "available", "primary",
-                           premium_reason=premium_reason, sources_ok=1,
-                           sources_total=1, is_whois=is_whois)
+        if len(sources) <= 1 or is_whois:
+            rounds = CNNIC_WHOIS_CONFIRM_ATTEMPTS if is_whois else 1
+            return make_result(domain, suffix, "available", "primary",
+                               premium_reason=premium_reason, sources_ok=1,
+                               sources_total=len(sources), verification_rounds=rounds,
+                               verification_detail=summarize_source_results(source_results),
+                               is_whois=is_whois)
+        # 有多个权威源时，available 必须继续复核；taken 冲突优先。
+        fallback_results = []
+        for src in sources[1:]:
+            code = query_single_source(domain, src)
+            source_results.append((src, code))
+            fallback_results.append(code)
+            if code == 200:
+                return make_result(domain, suffix, "taken", "fallback",
+                                   detail="权威源冲突：已注册信号优先",
+                                   premium_reason=premium_reason, sources_ok=1,
+                                   sources_total=len(sources),
+                                   verification_rounds=len(source_results),
+                                   verification_detail=summarize_source_results(source_results),
+                                   is_whois=is_whois)
+        available_hits = 1 + sum(1 for code in fallback_results if code == 404)
+        if available_hits >= 2:
+            return make_result(domain, suffix, "available", "fallback",
+                               premium_reason=premium_reason, sources_ok=available_hits,
+                               sources_total=len(sources),
+                               verification_rounds=len(source_results),
+                               verification_detail=summarize_source_results(source_results),
+                               is_whois=is_whois)
+        return make_result(domain, suffix, "error", "all_failed",
+                           f"可注册未完成复核：{available_hits}/{len(sources)} 个明确可注册信号",
+                           premium_reason=premium_reason, sources_ok=available_hits,
+                           sources_total=len(sources),
+                           verification_rounds=len(source_results),
+                           verification_detail=summarize_source_results(source_results),
+                           is_whois=is_whois, confidence=CONF_LOW)
     if primary == 200:
         return make_result(domain, suffix, "taken", "primary",
                            premium_reason=premium_reason, sources_ok=1,
-                           sources_total=1, is_whois=is_whois)
+                           sources_total=len(sources), verification_rounds=1,
+                           verification_detail=summarize_source_results(source_results),
+                           is_whois=is_whois)
 
     # 步骤 2：主源失败 → 并发所有回退源
     if len(sources) <= 1:
         return make_result(domain, suffix, "error", "all_failed", "主源失败且无回退",
                            premium_reason=premium_reason, sources_ok=0,
-                           sources_total=1, is_whois=is_whois, confidence=CONF_LOW)
+                           sources_total=1, verification_rounds=1,
+                           verification_detail=summarize_source_results(source_results),
+                           is_whois=is_whois, confidence=CONF_LOW)
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sources))) as pool:
             future_map = {pool.submit(query_single_source, domain, src): src for src in sources[1:]}
-            ok_count = 0
+            available_hits = 0
             for future in concurrent.futures.as_completed(future_map):
+                src = future_map[future]
                 try:
                     code = future.result()
                 except Exception:
+                    source_results.append((src, -1))
                     continue
-                ok_count += 1
-                if code == 404:
-                    return make_result(domain, suffix, "available", "fallback",
-                                       premium_reason=premium_reason, sources_ok=ok_count,
-                                       sources_total=len(sources), is_whois=is_whois)
+                source_results.append((src, code))
                 if code == 200:
                     return make_result(domain, suffix, "taken", "fallback",
-                                       premium_reason=premium_reason, sources_ok=ok_count,
-                                       sources_total=len(sources), is_whois=is_whois)
+                                       premium_reason=premium_reason, sources_ok=1,
+                                       sources_total=len(sources),
+                                       verification_rounds=len(source_results),
+                                       verification_detail=summarize_source_results(source_results),
+                                       is_whois=is_whois)
+                if code == 404:
+                    available_hits += 1
+            if available_hits >= 2:
+                return make_result(domain, suffix, "available", "fallback",
+                                   premium_reason=premium_reason, sources_ok=available_hits,
+                                   sources_total=len(sources),
+                                   verification_rounds=len(source_results),
+                                   verification_detail=summarize_source_results(source_results),
+                                   is_whois=is_whois)
     except Exception:
         pass
 
-    return make_result(domain, suffix, "error", "all_failed", "所有数据源查询失败",
-                       premium_reason=premium_reason, sources_ok=0,
-                       sources_total=len(sources), is_whois=is_whois, confidence=CONF_LOW)
+    available_seen = sum(1 for _, code in source_results if code == 404)
+    detail = (
+        f"可注册未完成复核：{available_seen}/{len(sources)} 个明确可注册信号"
+        if available_seen
+        else "所有数据源查询失败"
+    )
+    return make_result(domain, suffix, "error", "all_failed", detail,
+                       premium_reason=premium_reason,
+                       sources_ok=sum(1 for _, code in source_results if code in (200, 404)),
+                       sources_total=len(sources),
+                       verification_rounds=len(source_results),
+                       verification_detail=summarize_source_results(source_results),
+                       is_whois=is_whois, confidence=CONF_LOW)
 
 
 # ---------------------------------------------------------------------------

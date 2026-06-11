@@ -1318,7 +1318,8 @@ def _mk_result(domain: str, status: str, premium: bool, reason: str,
                method: str, detail: str = "",
                price_usd: float = "", currency: str = "",
                confidence: str = None, is_whois: bool = None,
-               sources_ok: int = None, sources_total: int = None) -> dict:
+               sources_ok: int = None, sources_total: int = None,
+               verification_rounds: int = None, verification_detail: str = "") -> dict:
     """构造标准结果 dict（统一字段）"""
     # 自动推断 is_whois
     if is_whois is None:
@@ -1344,6 +1345,8 @@ def _mk_result(domain: str, status: str, premium: bool, reason: str,
         "is_whois": is_whois,
         "sources_ok": sources_ok,
         "sources_total": sources_total,
+        "verification_rounds": verification_rounds or sources_total or 1,
+        "verification_detail": verification_detail or detail,
     }
     
     if confidence is None:
@@ -1627,6 +1630,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         "is_whois": False,
         "sources_ok": 0,
         "sources_total": len(sources),
+        "verification_rounds": 0,
+        "verification_detail": "",
         "confidence": "LOW",
     }
 
@@ -1662,6 +1667,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 result["is_whois"] = is_whois_primary
                 result["sources_ok"] = 2
                 result["sources_total"] = len(sources)
+                result["verification_rounds"] = 2
+                result["verification_detail"] = "DNS预筛 + 权威源复核"
                 result["confidence"] = score_confidence(result)
                 return result
 
@@ -1688,6 +1695,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                         result["is_whois"] = True
                         result["sources_ok"] = 1
                         result["sources_total"] = len(sources)
+                        result["verification_rounds"] = 2
+                        result["verification_detail"] = "DNS 与 WHOIS 冲突，已做二次核查"
                         result["confidence"] = "LOW"
                         result["detail"] = f"DNS 有 A 记录（{_real_ips[0]}）但 whois 返回未找到，选择相信 DNS"
                         return result
@@ -1700,6 +1709,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 result["is_whois"] = False
                 result["sources_ok"] = 1
                 result["sources_total"] = len(sources)
+                result["verification_rounds"] = 2
+                result["verification_detail"] = "DNS预筛 + 权威源复核"
                 result["confidence"] = score_confidence(result)
                 result["detail"] = f"DNS 显示有记录但 RDAP 404（疑似 DNS 劫持）：{dns_res.get('method', '?')}"
                 return result
@@ -1722,11 +1733,13 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 result["is_whois"] = any(s.startswith("whois://") for s in sources)
                 result["sources_ok"] = len(verify_taken)
                 result["sources_total"] = len(sources)
+                result["verification_rounds"] = len(verify_responses)
+                result["verification_detail"] = f"已核查 {len(verify_responses)} 个免费权威源"
                 result["confidence"] = score_confidence(result)
                 result["detail"] = "DNS 预筛命中，免费权威源复核为已注册"
                 return result
 
-            if verify_available:
+            if len(verify_available) >= 2 or (len(sources) == 1 and verify_available):
                 result["status"] = "available"
                 result["method"] = f"dns_prefilter_dns_hijack({dns_res.get('method', '?')})+rdap_consensus"
                 result["premium"] = is_likely_premium(full_domain)
@@ -1734,6 +1747,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 result["is_whois"] = any(s.startswith("whois://") for s in sources)
                 result["sources_ok"] = len(verify_available)
                 result["sources_total"] = len(sources)
+                result["verification_rounds"] = len(verify_responses)
+                result["verification_detail"] = f"已核查 {len(verify_responses)} 个免费权威源"
                 result["confidence"] = score_confidence(result)
                 result["detail"] = "DNS 显示有记录，但免费权威源返回可注册（疑似 DNS 劫持/通配解析）"
                 return result
@@ -1745,6 +1760,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
             result["is_whois"] = False
             result["sources_ok"] = 0
             result["sources_total"] = len(sources)
+            result["verification_rounds"] = len(verify_responses)
+            result["verification_detail"] = f"已核查 {len(verify_responses)} 个免费权威源"
             result["confidence"] = "LOW"
             error_summary = "|".join((e.get("error", "?") for e in verify_errors[:3])) or (verify_res.get("error", "?") if verify_res else "timeout")
             result["detail"] = f"免费权威源均无明确结论，需复核：{error_summary}"
@@ -1760,16 +1777,23 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     primary_res = await query_with_retry(_primary_query, max_retries=2)
     is_whois_primary = primary.startswith("whois://")
     if primary_res["ok"] and primary_res["status"] == 404:
-        result["status"] = "available"
-        result["premium"] = is_likely_premium(full_domain)
-        result["premiumReason"] = get_premium_reason(full_domain) or ""
-        result["method"] = "primary"
-        result["detail"] = primary_res.get("confirmations", "")
-        result["is_whois"] = is_whois_primary
-        result["sources_ok"] = 1
-        result["sources_total"] = len(sources)
-        result["confidence"] = score_confidence(result)
-        return result
+        if len(sources) > 1 and not is_whois_primary:
+            # 可注册需要完成后续多源复核；不能因主源一次 404 直接进入可注册。
+            pass
+        else:
+            rounds = CNNIC_WHOIS_CONFIRM_ATTEMPTS if is_whois_primary else 1
+            result["status"] = "available"
+            result["premium"] = is_likely_premium(full_domain)
+            result["premiumReason"] = get_premium_reason(full_domain) or ""
+            result["method"] = "primary"
+            result["detail"] = primary_res.get("confirmations", "")
+            result["is_whois"] = is_whois_primary
+            result["sources_ok"] = 1
+            result["sources_total"] = len(sources)
+            result["verification_rounds"] = rounds
+            result["verification_detail"] = primary_res.get("confirmations", "") or f"已核查 {rounds} 轮"
+            result["confidence"] = score_confidence(result)
+            return result
     if primary_res["ok"] and primary_res["status"] == 200:
         result["status"] = "taken"
         result["method"] = "primary"
@@ -1777,6 +1801,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         result["is_whois"] = is_whois_primary
         result["sources_ok"] = 1
         result["sources_total"] = len(sources)
+        result["verification_rounds"] = 1
+        result["verification_detail"] = "主源明确返回已注册"
         result["confidence"] = score_confidence(result)
         return result
 
@@ -1797,11 +1823,13 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     result["is_whois"] = any(s.startswith("whois://") for s in sources)
     result["sources_total"] = len(sources)
     result["sources_ok"] = len(available) + len(taken) + len(strange)
+    result["verification_rounds"] = len(responses)
+    result["verification_detail"] = f"已核查 {len(responses)} 个免费权威源"
 
     if taken:
         result["status"] = "taken"
         result["method"] = "consensus"
-    elif available:
+    elif len(available) >= 2 or (len(sources) == 1 and available):
         result["status"] = "available"
         result["premium"] = is_likely_premium(full_domain)
         result["premiumReason"] = get_premium_reason(full_domain) or ""
@@ -1810,6 +1838,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         # 全部失败
         if strange:
             result["detail"] = "奇怪状态:" + ",".join(str(r["status"]) for r in strange[:3])
+        elif available:
+            result["detail"] = f"可注册未完成复核：{len(available)}/{len(sources)} 个明确可注册信号"
         else:
             result["detail"] = "|".join(e["error"] for e in errors[:3])
 
