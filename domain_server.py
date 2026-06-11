@@ -22,7 +22,6 @@ from urllib.parse import unquote, urlparse
 
 import aiohttp
 
-import dns_prefilter
 import retry as retry_module
 
 import domain_checker
@@ -86,11 +85,11 @@ def _result_from_godaddy(domain, parsed):
 
 
 async def _query_rdap_items(items, workers):
-    """RDAP 查询（带 DNS 预筛 + 指数退避重试）
+    """RDAP 查询（DNS 预筛交给 check_domain 内部处理，带指数退避重试）
 
-    流程：
-      1. 并发 DNS 预筛：有 DNS 记录 → 直接标"已注册"，跳过 RDAP
-      2. RDAP 查询（带重试）：无 DNS 记录 → 走 RDAP，失败自动重试
+    重要：DNS 预筛的二次验证在 domain_checker.check_domain() 内部完成，
+    这里只做并发 RDAP 查询，**不要在 server 层做 DNS 预筛**，
+    否则会绕过 check_domain 的修复逻辑（commit 2f7fdea+）。
     """
     semaphore = asyncio.Semaphore(workers)
     connector = aiohttp.TCPConnector(limit=max(workers * 2, 10), ssl=False)
@@ -99,47 +98,15 @@ async def _query_rdap_items(items, workers):
         "Accept": "application/json",
     }
 
-    # 第 1 步：并发 DNS 预筛
-    async def _async_dns_check(item):
-        domain = item["domain"]
-        try:
-            # 异步执行同步的 has_dns_record 检查，避免阻塞主线程事件循环
-            has_record = await asyncio.to_thread(dns_prefilter.has_dns_record, domain)
-            if has_record:
-                return domain_checker._mk_result(
-                    domain, "taken", False, "",
-                    "dns",
-                    "DNS 预筛（有 A/AAAA 记录）",
-                )
-        except Exception:
-            pass
-        return item
+    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+        tasks = [
+            _rdap_with_retry(session, item, semaphore)
+            for item in items
+        ]
+        rdap_results = await asyncio.gather(*tasks)
 
-    dns_tasks = [_async_dns_check(item) for item in items]
-    dns_results = await asyncio.gather(*dns_tasks)
-
-    dns_hits = []
-    rdap_items = []
-    for res in dns_results:
-        if isinstance(res, dict) and res.get("status") == "taken":
-            dns_hits.append(res)
-        else:
-            rdap_items.append(res)
-
-    # 第 2 步：RDAP 查询剩余域名（无 DNS 记录的）
-    rdap_results = []
-    if rdap_items:
-        async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
-            tasks = [
-                _rdap_with_retry(session, item, semaphore)
-                for item in rdap_items
-            ]
-            rdap_results = await asyncio.gather(*tasks)
-
-    # 合并结果（DNS 预筛的先返回，RDAP 结果在后）
-    all_results = dns_hits + rdap_results
     # 保持原始顺序
-    result_map = {r["domain"]: r for r in all_results}
+    result_map = {r["domain"]: r for r in rdap_results}
     return [result_map[item["domain"]] for item in items]
 
 
