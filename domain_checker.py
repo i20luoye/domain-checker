@@ -1311,8 +1311,73 @@ def _mk_result(domain: str, status: str, premium: bool, reason: str,
         res["confidence"] = score_confidence(res)
     else:
         res["confidence"] = confidence
-        
+
+    # 中文化方法名（用户友好展示）
+    res["method_cn"] = _method_name_zh(method, detail, status)
+
     return res
+
+
+# ================== 方法名中文化 ==================
+def _method_name_zh(method: str, detail: str = "", status: str = "") -> str:
+    """把英文 method 字段翻译成中文，供前端直接展示
+
+    覆盖：
+      dns_prefilter(*)+rdap_verify      → DNS预筛+RDAP确认
+      dns_prefilter_unverified(*)       → DNS预筛(未验证)
+      dns_prefilter_dns_hijack(*)       → DNS劫持检测
+      consensus                         → 多源共识
+      primary / rdap                    → RDAP主源
+      rdap_failed / godaddy_failed      → 查询失败
+      godaddy / godaddypublic           → GoDaddy公共端点
+      porkbun / whoisfreaks / domainr   → 商业API
+      whois / whois_xxx                 → WHOIS端口43
+    """
+    m = (method or "").strip()
+
+    # DNS 预筛系列
+    if m.startswith("dns_prefilter") and "+rdap_verify" in m:
+        return "DNS预筛+RDAP确认"
+    if m.startswith("dns_prefilter_unverified"):
+        return "DNS预筛(待验证)"
+    if m.startswith("dns_prefilter_dns_hijack"):
+        return "DNS劫持检测"
+    if m.startswith("dns_prefilter"):
+        return "DNS预筛"
+
+    # 多源共识 / 单 RDAP
+    if m == "consensus" or m.startswith("consensus_"):
+        return "多源RDAP共识"
+    if m == "primary":
+        return "RDAP主源"
+    if m == "rdap":
+        return "RDAP权威"
+
+    # RDAP 失败
+    if m.startswith("rdap_failed"):
+        return "RDAP查询失败"
+    if m.startswith("godaddy_failed"):
+        return "GoDaddy失败"
+
+    # 商业 API
+    if m == "godaddy" or m == "godaddypublic":
+        return "GoDaddy公共端点"
+    if m == "porkbun":
+        return "Porkbun"
+    if m == "whoisfreaks":
+        return "WhoisFreaks"
+    if m == "domainr":
+        return "Domainr"
+
+    # WHOIS
+    if m == "whois" or m.startswith("whois_"):
+        return "WHOIS端口43"
+
+    # 主源直查（兜底）
+    if "主源直查" in m or "main" in m:
+        return "主源直查"
+
+    return m or "未知"
 
 
 # ================== JSON 导入（GoDaddy 用） ==================
@@ -1533,14 +1598,15 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     if DNS_PREFILTER_ENABLED:
         dns_res = await dns_prefilter_check(full_domain, DNS_PREFILTER_TIMEOUT)
         if dns_res.get("ok") and dns_res.get("registered"):
-            # 二次验证：用 RDAP 主源确认 DNS 预筛结论
+            # 二次验证：用 RDAP 主源 + 备源 确认 DNS 预筛结论
+            # 修复：超时也要重试（之前 max_retries=1 实际不重试，CNNIC 慢导致 LOW 置信度大量出现）
             primary = sources[0]
             is_whois_primary = primary.startswith("whois://")
             primary_url = primary + (f"/{full_domain}" if is_whois_primary else full_domain)
             try:
                 verify_res = await query_with_retry(
-                    lambda: query_one_source(session, primary_url, semaphore, timeout_sec=3),
-                    max_retries=1,
+                    lambda: query_one_source(session, primary_url, semaphore, timeout_sec=5),
+                    max_retries=2,
                 )
                 if verify_res["ok"] and verify_res["status"] == 200:
                     # RDAP 确认已注册 → 双源一致，置信度高

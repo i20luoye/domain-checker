@@ -1173,8 +1173,9 @@ function createRow(entry){
   }
 
   // 来源标签：附加 sources_ok/total 和 WHOIS 标识
+  // 优先使用后端返回的 method_cn，没有再降级到 methodText
   let methodHTML = '';
-  const methodBase = methodText[entry.method] || escapeHtml(entry.method);
+  const methodBase = entry.method_cn || methodText[entry.method] || escapeHtml(entry.method);
   const sourcesCount = entry.sources_total > 0
     ? ` <span style="color:#64748b;font-size:10px">${entry.sources_ok}/${entry.sources_total}</span>`
     : '';
@@ -1239,7 +1240,8 @@ function exportCSV(){
     const proto = r.is_whois ? 'WHOIS' : 'RDAP';
     const sources = r.sources_total > 0 ? `${r.sources_ok}/${r.sources_total}` : '';
     const time = r.checked_at ? new Date(r.checked_at*1000).toLocaleString('zh-CN') : '';
-    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${methodText[r.method]||r.method}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
+    const mLabel = r.method_cn || methodText[r.method] || r.method;
+    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${mLabel}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
   }
   downloadFile(csv, '域名查询结果_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
 }
@@ -1253,7 +1255,8 @@ function exportAvailable(){
     const proto = r.is_whois ? 'WHOIS' : 'RDAP';
     const sources = r.sources_total > 0 ? `${r.sources_ok}/${r.sources_total}` : '';
     const time = r.checked_at ? new Date(r.checked_at*1000).toLocaleString('zh-CN') : '';
-    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${methodText[r.method]||r.method}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
+    const mLabel = r.method_cn || methodText[r.method] || r.method;
+    csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${mLabel}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
   }
   downloadFile(csv, '可注册域名_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
 }
