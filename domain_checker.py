@@ -88,13 +88,18 @@ RDAP_SOURCES = {
         "https://rdap.iana.org/domain/",
     ],
     "org": [
-        "https://rdap.publicinterestregistry.org/rdap/org/domain/",
+        "https://rdap.publicinterestregistry.org/rdap/domain/",
         "https://rdap.iana.org/domain/",
     ],
     # 关键：.cn 的 RDAP 在 IANA bootstrap 里不存在，CNNIC 自有 RDAP 也不可用（SSL 失败、用了文档示例 IP）
     # 用 CNNIC 的 whois 端口 43（标准协议），可用且稳定
     "cn": ["whois://whois.cnnic.cn:43"],
-    "io": ["https://rdap.iana.org/domain/"],
+    # .io 三个源：identitydigital（推荐主源）+ nic.io（备用）+ iana.org（兜底）
+    "io": [
+        "https://rdap.identitydigital.services/rdap/domain/",
+        "https://rdap.nic.io/domain/",
+        "https://rdap.iana.org/domain/",
+    ],
     "ai": [
         "https://rdap.nic.ai/domain/",
         "https://rdap.iana.org/domain/",
@@ -1522,15 +1527,53 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     }
 
     # ============ Stage 0: DNS 预筛（5ms 本地拦截）============
+    # 重要：DNS 预筛命中后必须走 RDAP 二次验证，
+    # 因为公共 DNS 常有 wildcard catch-all（广告 IP）会污染"已注册"判定。
     if DNS_PREFILTER_ENABLED:
         dns_res = await dns_prefilter_check(full_domain, DNS_PREFILTER_TIMEOUT)
         if dns_res.get("ok") and dns_res.get("registered"):
+            # 二次验证：用 RDAP 主源确认 DNS 预筛结论
+            primary = sources[0]
+            is_whois_primary = primary.startswith("whois://")
+            primary_url = primary + (f"/{full_domain}" if is_whois_primary else full_domain)
+            try:
+                verify_res = await query_with_retry(
+                    lambda: query_one_source(session, primary_url, semaphore, timeout_sec=3),
+                    max_retries=1,
+                )
+                if verify_res["ok"] and verify_res["status"] == 200:
+                    # RDAP 确认已注册 → 双源一致，置信度高
+                    result["status"] = "taken"
+                    result["method"] = f"dns_prefilter({dns_res.get('method', '?')})+rdap_verify"
+                    result["is_whois"] = is_whois_primary
+                    result["sources_ok"] = 2
+                    result["sources_total"] = len(sources)
+                    result["confidence"] = score_confidence(result)
+                    return result
+                if verify_res["ok"] and verify_res["status"] == 404:
+                    # RDAP 404 → 推翻 DNS 预筛结论，域名其实可注册（DNS 劫持/通配）
+                    result["status"] = "available"
+                    result["method"] = f"dns_prefilter_dns_hijack({dns_res.get('method', '?')})"
+                    result["premium"] = is_likely_premium(full_domain)
+                    result["premiumReason"] = get_premium_reason(full_domain) or ""
+                    result["is_whois"] = False
+                    result["sources_ok"] = 1
+                    result["sources_total"] = len(sources)
+                    result["confidence"] = score_confidence(result)
+                    result["detail"] = f"DNS 显示有记录但 RDAP 404（疑似 DNS 劫持）：{dns_res.get('method', '?')}"
+                    return result
+            except Exception:
+                # 验证源失败时降级：保留 DNS 结论但置信度低
+                pass
+
+            # 验证失败时的降级结果（仍判定 taken，但置信度 LOW）
             result["status"] = "taken"
-            result["method"] = f"dns_prefilter({dns_res.get('method', '?')})"
+            result["method"] = f"dns_prefilter_unverified({dns_res.get('method', '?')})"
             result["is_whois"] = False
             result["sources_ok"] = 1
             result["sources_total"] = len(sources)
             result["confidence"] = score_confidence(result)
+            result["detail"] = f"DNS 预筛命中但 RDAP 验证失败：{dns_res.get('method', '?')}"
             return result
 
     # ============ Stage 1: 主源快速判定（带重试）============
@@ -2125,8 +2168,16 @@ CONFIDENCE_LOW = "LOW"               # 所有源都失败，仅 DNS 无记录
 def score_confidence(result: dict) -> str:
     """根据结果详情评分
 
-    Args:
-        result: check_domain() 返回的 dict
+    评分原则（修复 P0-002）：
+      - 错误 → LOW
+      - DNS 预筛单源（无 RDAP 二次验证）→ taken=LOW, available=LOW（DNS 不可信）
+      - DNS 预筛 + RDAP 二次确认 → taken=HIGH, available=HIGH
+      - DNS 预筛 + RDAP 404（推翻 DNS 结论）→ available=LOW（DNS 不可信）
+      - RDAP 主源 404 → available=VERY_HIGH（权威判定）
+      - RDAP 主源 200 → taken=HIGH
+      - RDAP 多源 consensus → taken=HIGH, available=VERY_HIGH
+      - WHOIS 端口 43 → MEDIUM
+      - 商业 API（GoDaddy/Porkbun/Domainr/WhoisFreaks）→ taken=VERY_HIGH, available=HIGH
 
     Returns:
         "VERY_HIGH" / "HIGH" / "MEDIUM" / "LOW"
@@ -2139,27 +2190,51 @@ def score_confidence(result: dict) -> str:
         # 所有源都失败 → LOW
         return CONFIDENCE_LOW
 
-    if method == "dns_prefilter":
-        # DNS 预筛：被 dnspython/socket 确认无记录，概率高
+    # === DNS 预筛路径（修复 P0-001 后）===
+    if method.startswith("dns_prefilter"):
+        # DNS 预筛 + RDAP 二次确认成功（taken + RDAP 200）
+        if "+rdap_verify" in method:
+            if status == "taken":
+                return CONFIDENCE_HIGH
+            return CONFIDENCE_HIGH
+        # DNS 预筛命中但 RDAP 验证失败（保留 taken 降级）
+        if "unverified" in method:
+            if status == "taken":
+                return CONFIDENCE_LOW  # 未经验证，不可信
+            return CONFIDENCE_LOW
+        # DNS 预筛 + RDAP 404（DNS 劫持推翻）
+        if "dns_hijack" in method:
+            if status == "available":
+                return CONFIDENCE_LOW  # DNS 不可信，但 RDAP 404 = 权威
+            return CONFIDENCE_LOW
+        # 旧版单源 DNS 预筛（没经过修复的代码路径）
         if status == "available":
-            return CONFIDENCE_MEDIUM  # 还要 RDAP 确认
+            return CONFIDENCE_LOW  # DNS 显示无记录 = RDAP 还要走
         elif status == "taken":
-            return CONFIDENCE_VERY_HIGH  # DNS 有记录，基本确凿
+            return CONFIDENCE_LOW  # 没二次验证，不可信
 
+    # === RDAP 路径 ===
     if method == "rdap" or method.startswith("consensus"):
         if status == "available":
             return CONFIDENCE_VERY_HIGH  # RDAP 404 = 权威
         elif status == "taken":
             return CONFIDENCE_HIGH
 
-    # 商业 API（GoDaddy/Porkbun 等）返回可用 → HIGH
-    if method in ("godaddy", "godaddypublic", "porkbun", "whoisfreaks", "domainr"):
+    # === RDAP 主源 404/200 单一源判定（method="primary"） ===
+    if method == "primary":
         if status == "available":
-            return CONFIDENCE_HIGH
+            return CONFIDENCE_VERY_HIGH  # RDAP 404 = 权威
         elif status == "taken":
             return CONFIDENCE_HIGH
 
-    # WHOIS 端口 43 → MEDIUM
+    # === 商业 API 路径（GoDaddy/Porkbun/Domainr/WhoisFreaks） ===
+    if method in ("godaddy", "godaddypublic", "porkbun", "whoisfreaks", "domainr"):
+        if status == "available":
+            return CONFIDENCE_HIGH  # 商业 API 可信
+        elif status == "taken":
+            return CONFIDENCE_VERY_HIGH  # 商业 API 权威
+
+    # === WHOIS 端口 43 ===
     if method == "whois" or method.startswith("whois_"):
         return CONFIDENCE_MEDIUM
 

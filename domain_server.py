@@ -286,7 +286,11 @@ class DomainServerHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/check":
             _json_response(self, 200, {
                 "ok": True,
-                "bootstrap_loaded": 1200,
+                "status": "healthy",
+                "bootstrap_loaded": len(domain_checker.RDAP_SOURCES),
+                "bootstrap_error": "",
+                "dns_prefilter": True,
+                "ts": int(time.time()),
             })
             return
 
@@ -319,6 +323,7 @@ class DomainServerHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
             return
 
+        t0 = time.time()
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length > 1024 * 1024:
@@ -328,9 +333,21 @@ class DomainServerHandler(BaseHTTPRequestHandler):
             source = payload.get("source", os.environ.get("DOMAIN_CHECKER_SOURCE", "rdap"))
             workers = payload.get("workers", 30)
             results = asyncio.run(query_items(items, source=source, workers=workers))
-            _json_response(self, 200, {"ok": True, "results": results})
+            elapsed_ms = int((time.time() - t0) * 1000)
+            _json_response(self, 200, {
+                "ok": True,
+                "elapsed_ms": elapsed_ms,
+                "bootstrap_loaded": len(domain_checker.RDAP_SOURCES),
+                "bootstrap_error": "",
+                "count": len(results),
+                "results": results,
+            })
         except Exception as exc:
-            _json_response(self, 400, {"ok": False, "error": str(exc)})
+            _json_response(self, 400, {
+                "ok": False,
+                "elapsed_ms": int((time.time() - t0) * 1000),
+                "error": str(exc),
+            })
 
 
 def main():
