@@ -401,6 +401,27 @@ td:first-child{color:#64748b;font-size:12px}
   border-radius:8px;
 }
 @keyframes skeletonShine{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ── Pagination ───────────────────────────────────────────── */
+.pagination-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 12px;
+  border-top: 1px solid rgba(15,23,42,.08);
+}
+.page-info {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+.pagination-container .btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 8px;
+}
 </style>
 </head>
 <body>
@@ -572,6 +593,12 @@ td:first-child{color:#64748b;font-size:12px}
     </table>
     <div class="table-footer hidden" id="tableFooter">仅显示前 500 条，请使用筛选或导出查看全部</div>
   </div>
+  <!-- Pagination -->
+  <div class="pagination-container hidden" id="paginationContainer">
+    <button class="btn btn-sm btn-indigo" id="btnPrevPage" onclick="prevPage()">上一页</button>
+    <span class="page-info" id="pageInfo">第 1 / 1 页</span>
+    <button class="btn btn-sm btn-indigo" id="btnNextPage" onclick="nextPage()">下一页</button>
+  </div>
   <!-- Empty state -->
   <div class="empty-state" id="emptyState">
     <div class="icon">🌐</div>
@@ -651,6 +678,8 @@ let concurrent = 3;
 let speedInterval = null;
 let lastChecked = 0;
 let lastSpeedTime = 0;
+let currentPage = 1;
+const PAGE_SIZE = 500;
 
 // ── DOM refs ──
 const $ = id => document.getElementById(id);
@@ -843,6 +872,7 @@ async function startCheck(){
   checked = 0;
   allResults = [];
   stats = {available:0,taken:0,error:0,premium:0};
+  currentPage = 1;
   running = true;
   paused = false;
   startTime = Date.now();
@@ -1037,12 +1067,34 @@ function getFilteredResults(){
 function renderTable(){
   const tbody = $('resultsBody');
   const filtered = getFilteredResults();
-  const show = filtered.slice(0, MAX_DISPLAY);
+  
+  // Calculate total pages
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (currentPage > totalPages) {
+    currentPage = totalPages;
+  }
+  
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const end = start + PAGE_SIZE;
+  const show = filtered.slice(start, end);
+  
   tbody.innerHTML = '';
   for(const entry of show){
     tbody.appendChild(createRow(entry));
   }
-  $('tableFooter').classList.toggle('hidden', filtered.length <= MAX_DISPLAY);
+  
+  // Update pagination UI
+  const pag = $('paginationContainer');
+  if (filtered.length > 0) {
+    pag.classList.remove('hidden');
+    $('pageInfo').textContent = `第 ${currentPage} / ${totalPages} 页`;
+    $('btnPrevPage').disabled = currentPage === 1;
+    $('btnNextPage').disabled = currentPage === totalPages;
+  } else {
+    pag.classList.add('hidden');
+  }
+  
+  $('tableFooter').classList.add('hidden');
   $('resultCount').textContent = filtered.length.toLocaleString() + ' 条结果';
   $('emptyState').classList.toggle('hidden', allResults.length > 0);
   $('tableWrap').classList.toggle('hidden', allResults.length === 0);
@@ -1050,22 +1102,54 @@ function renderTable(){
 
 function appendRow(entry){
   if(!matchesFilter(entry)) return;
-  const tbody = $('resultsBody');
-  const rowCount = tbody.children.length;
-  if(rowCount >= MAX_DISPLAY){
-    $('tableFooter').classList.remove('hidden');
-    updateResultCount();
-    return;
+  
+  const filtered = getFilteredResults();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  
+  // Only append to DOM if the new entry belongs to the currently displayed page
+  const entryIndexInFiltered = filtered.findIndex(e => e.domain === entry.domain);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const end = start + PAGE_SIZE;
+  
+  if (entryIndexInFiltered >= start && entryIndexInFiltered < end) {
+    const tbody = $('resultsBody');
+    tbody.appendChild(createRow(entry));
   }
-  tbody.appendChild(createRow(entry));
+  
   $('emptyState').classList.add('hidden');
   $('tableWrap').classList.remove('hidden');
+  
+  // Update pagination UI
+  const pag = $('paginationContainer');
+  pag.classList.remove('hidden');
+  $('pageInfo').textContent = `第 ${currentPage} / ${totalPages} 页`;
+  $('btnPrevPage').disabled = currentPage === 1;
+  $('btnNextPage').disabled = currentPage === totalPages;
+  
   updateResultCount();
 }
 
 function updateResultCount(){
   const filtered = getFilteredResults();
   $('resultCount').textContent = filtered.length.toLocaleString() + ' 条结果';
+}
+
+function prevPage(){
+  if(currentPage > 1){
+    currentPage--;
+    renderTable();
+    $('tableWrap').scrollTop = 0;
+  }
+}
+
+function nextPage(){
+  const filtered = getFilteredResults();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if(currentPage < totalPages){
+    currentPage++;
+    renderTable();
+    $('tableWrap').scrollTop = 0;
+  }
 }
 
 function createRow(entry){
@@ -1119,18 +1203,21 @@ function escapeHtml(s){
 // ── Filters ──
 function setFilter(mode, el){
   filterMode = mode;
+  currentPage = 1;
   document.querySelectorAll('.filter-pill').forEach(p=>p.classList.remove('active'));
   if(el) el.classList.add('active');
   renderTable();
 }
 function setAlpha(letter, el){
   alphaFilter = letter;
+  currentPage = 1;
   document.querySelectorAll('.alpha-btn').forEach(b=>b.classList.remove('active'));
   if(el) el.classList.add('active');
   renderTable();
 }
 function onSearchInput(){
   searchQuery = $('searchInput').value.trim().toLowerCase();
+  currentPage = 1;
   renderTable();
 }
 
@@ -1191,6 +1278,7 @@ async function recheckFailed(){
   queueIndex = 0;
   running = true;
   paused = false;
+  currentPage = 1;
   startTime = Date.now();
   controller = new AbortController();
 
