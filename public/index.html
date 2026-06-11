@@ -1070,11 +1070,11 @@ function updateResultCount(){
 
 function createRow(entry){
   const tr = document.createElement('tr');
-  const isAvailOrPrem = entry.status === 'available' || entry.status === 'premium';
+  const showLinks = entry.status === 'available' || entry.status === 'premium' || entry.status === 'error';
   const domainBase = entry.domain.split('.').slice(0,-1).join('.');
 
   let actionHTML = '';
-  if(isAvailOrPrem){
+  if(showLinks){
     actionHTML = `<a class="action-link" href="${ALIYUN_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">阿里云</a>
       <a class="action-link" href="${GODADDY_URL}${encodeURIComponent(entry.domain)}" target="_blank" rel="noopener">GoDaddy</a>`;
   }
