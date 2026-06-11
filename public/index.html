@@ -1258,19 +1258,76 @@ function exportCSV(){
   downloadFile(csv, '域名查询结果_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
 }
 
-function exportAvailable(){
+async function exportAvailable(){
   const avail = allResults.filter(r=>r.status==='available'||r.status==='premium');
   if(!avail.length){alert('没有可注册的域名');return;}
+  const verified = await verifyAvailableBeforeExport(avail);
+  if(!verified.length){alert('导出前复核后，没有可确认注册的域名');return;}
   const BOM = '\uFEFF';
   let csv = BOM + '序号,域名,后缀,状态,溢价原因,来源,协议,置信度,数据源,时间\n';
-  for(const r of avail){
+  for(const r of verified){
     const proto = r.is_whois ? 'WHOIS' : 'RDAP';
     const sources = r.sources_total > 0 ? `${r.sources_ok}/${r.sources_total}` : '';
     const time = r.checked_at ? new Date(r.checked_at*1000).toLocaleString('zh-CN') : '';
-    const mLabel = r.method_cn || methodText[r.method] || r.method;
+    const mLabel = r.method_cn || getMethodLabel(r.method);
     csv += `${r.index},"${r.domain}",".${r.suffix}","${statusText[r.status]||r.status}","${r.premiumReason}","${mLabel}","${proto}","${r.confidence||''}","${sources}","${time}"\n`;
   }
-  downloadFile(csv, '可注册域名_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
+  downloadFile(csv, '复核可注册域名_' + getTimestamp() + '.csv', 'text/csv;charset=utf-8');
+}
+
+async function verifyAvailableBeforeExport(rows){
+  $('btnExportAvail').disabled = true;
+  const oldText = $('btnExportAvail').innerHTML;
+  $('btnExportAvail').innerHTML = '<span>⏳</span> 导出前复核中';
+  const verified = [];
+  let rejected = 0;
+  try{
+    for(let i=0;i<rows.length;i+=batchSize){
+      const batch = rows.slice(i, i + batchSize).map(r=>r.domain);
+      const response = await fetch('/api/check', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({domains: batch})
+      });
+      if(!response.ok){
+        rejected += batch.length;
+        continue;
+      }
+      const data = await response.json();
+      for(const result of (data.results || [])){
+        if(result.status !== 'available') {
+          rejected++;
+          continue;
+        }
+        const parts = result.domain.split('.');
+        const tld = parts.pop();
+        const base = parts.join('.');
+        const premCheck = isPremiumDomain(base, tld);
+        const status = (result.premium || premCheck.premium) ? 'premium' : 'available';
+        verified.push({
+          index: verified.length + 1,
+          domain: result.domain,
+          suffix: result.suffix || tld,
+          status,
+          premiumReason: result.premiumReason || (premCheck.premium ? premCheck.reason : ''),
+          method: result.method || '',
+          method_cn: result.method_cn || '',
+          confidence: result.confidence || 'LOW',
+          is_whois: !!result.is_whois,
+          sources_ok: result.sources_ok || 0,
+          sources_total: result.sources_total || 0,
+          checked_at: result.checked_at || Math.floor(Date.now()/1000)
+        });
+      }
+    }
+  }finally{
+    $('btnExportAvail').innerHTML = oldText;
+    $('btnExportAvail').disabled = allResults.length === 0;
+  }
+  if(rejected > 0){
+    alert(`导出前已复核：确认可注册 ${verified.length} 个，剔除/需复核 ${rejected} 个。`);
+  }
+  return verified;
 }
 
 function downloadFile(content, filename, type){

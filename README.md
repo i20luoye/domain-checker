@@ -87,6 +87,14 @@ python domain_checker.py --source rdap --prefix ai --length 7 --suffix com --let
 
 如果免费权威源都没有明确结论，结果会标为 `error`，前端显示为“需复核”，不会硬判为可注册或已注册。
 
+`.cn` 默认启用严格模式：
+
+- 已注册：任一次 CNNIC WHOIS 返回 `Domain Name:` 即判定为已注册。
+- 可注册：必须连续两次返回 `No matching record.` 才判定为可注册。
+- 空响应、连接重置、一次成功一次失败：全部标为“需复核”。
+
+导出“可注册域名”时，前端会再次调用后端复核，只导出复核后仍然可注册的域名。
+
 ## TLD 预设 + 置信度评分
 
 ```bash

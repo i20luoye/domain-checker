@@ -42,6 +42,13 @@ GODADDY_BASE = os.environ.get("GODADDY_BASE", "https://api.ote-godaddy.com")
 # GoDaddy 批量接口单次最多 ~500 个域名
 GODADDY_BATCH_SIZE = 500
 
+# CNNIC WHOIS 在批量查询时可能空响应/重置连接；为了避免“假可注册”，
+# .cn 可注册必须得到连续明确确认，已注册则任一次命中 Domain Name 即可。
+CNNIC_WHOIS_CONFIRM_ATTEMPTS = int(os.environ.get("CNNIC_WHOIS_CONFIRM_ATTEMPTS", "2"))
+CNNIC_WHOIS_CONCURRENCY = int(os.environ.get("CNNIC_WHOIS_CONCURRENCY", "5"))
+CNNIC_WHOIS_RETRY_DELAY = float(os.environ.get("CNNIC_WHOIS_RETRY_DELAY", "0.15"))
+_CNNIC_WHOIS_SEMAPHORE = threading.BoundedSemaphore(max(1, CNNIC_WHOIS_CONCURRENCY))
+
 # Windows 终端中文输出修复
 if sys.platform == "win32":
     try:
@@ -290,14 +297,8 @@ async def query_one_source(session, url, semaphore, timeout_sec=8):
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:50]}"}
 
 
-def whois_query_sync(host, port, domain, timeout_sec=8):
-    """同步 whois 查询，返回 dict 模拟 RDAP 响应（taken/available/error）
-
-    CNNIC 响应规则（实测验证）：
-    - 已注册：返回包含 "Domain Name:" 字段
-    - 未注册：返回包含 "No matching"（实际是 "No matching record." 中文 "未找到"）
-    - 极少见：空响应（视为可注册，需用户人工复核）
-    """
+def _whois_query_once_sync(host, port, domain, timeout_sec=8):
+    """单次 whois 查询，返回 dict 模拟 RDAP 响应（taken/available/error）。"""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout_sec)
@@ -316,8 +317,7 @@ def whois_query_sync(host, port, domain, timeout_sec=8):
         text = data.decode('utf-8', errors='ignore').strip()
 
         if not text:
-            # 空响应：CNNIC 偶尔返回空，按可注册处理
-            return {"ok": True, "status": 404, "warning": "empty_response"}
+            return {"ok": False, "error": "empty_response"}
 
         text_lower = text.lower()
         # CNNIC 关键词：未匹配 / 未找到 / not found
@@ -332,12 +332,51 @@ def whois_query_sync(host, port, domain, timeout_sec=8):
         if 'domain name:' in text_lower or 'registrant:' in text_lower or 'status:' in text_lower:
             return {"ok": True, "status": 200}
 
-        # 兜底：无法识别，标 unknown
-        return {"ok": True, "status": 200, "warning": "unparsed"}
+        return {"ok": False, "error": f"unparsed_response: {text[:80]}"}
     except socket.timeout:
         return {"ok": False, "error": "timeout"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:50]}"}
+
+
+def _cnnic_whois_query_sync(host, port, domain, timeout_sec=8):
+    """CNNIC 严格模式：taken 一次命中即可；available 必须连续明确确认。"""
+    attempts = max(1, CNNIC_WHOIS_CONFIRM_ATTEMPTS)
+    available_hits = 0
+    errors = []
+
+    with _CNNIC_WHOIS_SEMAPHORE:
+        for idx in range(attempts):
+            res = _whois_query_once_sync(host, port, domain, timeout_sec)
+            if res.get("ok") and res.get("status") == 200:
+                res["confirmations"] = f"taken:{idx + 1}/{attempts}"
+                return res
+            if res.get("ok") and res.get("status") == 404:
+                available_hits += 1
+            else:
+                errors.append(res.get("error", "unknown"))
+
+            if idx < attempts - 1:
+                time.sleep(CNNIC_WHOIS_RETRY_DELAY)
+
+    if available_hits >= attempts:
+        return {"ok": True, "status": 404, "confirmations": f"available:{available_hits}/{attempts}"}
+
+    details = "|".join(errors[:3]) if errors else "inconsistent_cnnic_response"
+    return {
+        "ok": False,
+        "error": f"cnnic_available_unconfirmed:{available_hits}/{attempts};{details}",
+    }
+
+
+def whois_query_sync(host, port, domain, timeout_sec=8):
+    """同步 whois 查询。
+
+    对 CNNIC 使用严格模式，避免空响应/单次 No matching 导致假可注册。
+    """
+    if "cnnic.cn" in host.lower():
+        return _cnnic_whois_query_sync(host, port, domain, timeout_sec)
+    return _whois_query_once_sync(host, port, domain, timeout_sec)
 
 
 async def whois_query(host, port, domain, timeout_sec=8):
@@ -1725,6 +1764,7 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
         result["premium"] = is_likely_premium(full_domain)
         result["premiumReason"] = get_premium_reason(full_domain) or ""
         result["method"] = "primary"
+        result["detail"] = primary_res.get("confirmations", "")
         result["is_whois"] = is_whois_primary
         result["sources_ok"] = 1
         result["sources_total"] = len(sources)
@@ -1733,6 +1773,7 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
     if primary_res["ok"] and primary_res["status"] == 200:
         result["status"] = "taken"
         result["method"] = "primary"
+        result["detail"] = primary_res.get("confirmations", "")
         result["is_whois"] = is_whois_primary
         result["sources_ok"] = 1
         result["sources_total"] = len(sources)

@@ -31,6 +31,7 @@ from typing import Optional, Literal
 MAX_DOMAINS_PER_REQUEST = 20   # Vercel 10s 限制下，单请求最多 20 个域名
 QUERY_TIMEOUT = 4              # 每次 RDAP 查询超时（秒）
 MAX_WORKERS = 8                # 并发线程数（避免触发 Vercel CPU 限制）
+CNNIC_WHOIS_CONFIRM_ATTEMPTS = 2
 
 # ---------------------------------------------------------------------------
 # 启动时加载 IANA Bootstrap（1200+ TLD 的 RDAP 服务器表）
@@ -191,8 +192,8 @@ def query_rdap(domain: str, rdap_url: str) -> int:
         return -1
 
 
-def query_whois(domain: str, host: str = "whois.cnnic.cn", port: int = 43) -> int:
-    """Whois 端口 43 查询（用于 .cn）"""
+def query_whois_once(domain: str, host: str = "whois.cnnic.cn", port: int = 43) -> int:
+    """单次 Whois 端口 43 查询。200=taken, 404=available, -1=无明确结论。"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(QUERY_TIMEOUT)
@@ -207,7 +208,7 @@ def query_whois(domain: str, host: str = "whois.cnnic.cn", port: int = 43) -> in
         sock.close()
         response = b"".join(chunks).decode("utf-8", errors="replace").lower()
         if not response.strip():
-            return 404
+            return -1
         if "no matching" in response or "not found" in response:
             return 404
         if "domain name:" in response or "registrant:" in response:
@@ -215,6 +216,30 @@ def query_whois(domain: str, host: str = "whois.cnnic.cn", port: int = 43) -> in
         return -1
     except Exception:
         return -1
+
+
+def query_whois(domain: str, host: str = "whois.cnnic.cn", port: int = 43) -> int:
+    """Whois 查询。
+
+    CNNIC 严格模式：已注册一次命中即可；可注册必须连续两次明确 No matching。
+    这样宁可返回需复核，也不把空响应/偶发错误误判成可注册。
+    """
+    if "cnnic.cn" not in host.lower():
+        return query_whois_once(domain, host, port)
+
+    available_hits = 0
+    for idx in range(CNNIC_WHOIS_CONFIRM_ATTEMPTS):
+        code = query_whois_once(domain, host, port)
+        if code == 200:
+            return 200
+        if code == 404:
+            available_hits += 1
+        if idx < CNNIC_WHOIS_CONFIRM_ATTEMPTS - 1:
+            time.sleep(0.15)
+
+    if available_hits >= CNNIC_WHOIS_CONFIRM_ATTEMPTS:
+        return 404
+    return -1
 
 
 def query_single_source(domain: str, source_url: str) -> int:
