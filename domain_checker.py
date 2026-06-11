@@ -1649,7 +1649,8 @@ async def check_domain(session, full_domain: str, suffix: str, semaphore) -> dic
                 if gd_data and gd_data.get("ok"):
                     if gd_data.get("available"):
                         # GoDaddy 确认：域名可注册（一口价/溢价/标准）
-                        result["status"] = "premium" if gd_data.get("premium") else "available"
+                        # 注意：status 统一用"available"，溢价信息放 premium 字段
+                        result["status"] = "available"
                         result["method"] = f"godaddypublic_recover(dns_soa)"
                         result["premium"] = bool(gd_data.get("premium"))
                         result["premiumReason"] = "GoDaddy 一口价" if gd_data.get("premium") else ""
