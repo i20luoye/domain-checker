@@ -25,6 +25,7 @@ import itertools
 import string
 import csv
 import time
+import threading
 import argparse
 import os
 import socket
@@ -2335,6 +2336,68 @@ def discover_whois_server(tld: str) -> str | None:
         return None
 
     return None
+
+
+# ================== 模块导入时自动加载 IANA Bootstrap ==================
+# 解决 domain_server.py 之前不加载 bootstrap 导致 RDAP_SOURCES 只有 8 个硬编码的问题
+_bootstrap_init_state = {
+    "loaded": False,
+    "loading": False,
+    "count": 0,
+    "elapsed_sec": 0.0,
+    "error": "",
+}
+
+
+def init_bootstrap(timeout_sec: float = 8.0) -> bool:
+    """同步加载 IANA bootstrap，更新 RDAP_SOURCES（阻塞，最多 8s）
+
+    适用：CLI 启动时 / Server 启动时，确保 TLD 字典就绪再接收请求。
+    """
+    if _bootstrap_init_state["loading"]:
+        return False
+    _bootstrap_init_state["loading"] = True
+    t0 = time.time()
+    try:
+        data = load_iana_bootstrap_sync()
+        elapsed = time.time() - t0
+        if data:
+            new_sources = build_rdap_sources(data)
+            RDAP_SOURCES.clear()
+            RDAP_SOURCES.update(new_sources)
+            _bootstrap_init_state["loaded"] = True
+            _bootstrap_init_state["count"] = len(RDAP_SOURCES)
+            _bootstrap_init_state["elapsed_sec"] = elapsed
+            print(f"[IANA] 已加载 {len(data)} 个 TLD → RDAP_SOURCES 共 {len(RDAP_SOURCES)} 个 TLD ({elapsed:.1f}s)")
+            return True
+        _bootstrap_init_state["error"] = "no_data"
+        return False
+    except Exception as e:
+        elapsed = time.time() - t0
+        _bootstrap_init_state["error"] = f"{type(e).__name__}: {str(e)[:80]}"
+        print(f"[IANA] 加载失败（不影响现有 8 个 TLD）: {_bootstrap_init_state['error']} ({elapsed:.1f}s)")
+        return False
+    finally:
+        _bootstrap_init_state["loading"] = False
+
+
+def init_bootstrap_async() -> threading.Thread:
+    """后台线程加载 IANA bootstrap，不阻塞 import / 启动
+
+    适用：模块 import 末尾自动调用，server 启动后立即可服务。
+    """
+    t = threading.Thread(target=lambda: init_bootstrap(timeout_sec=10.0), daemon=True, name="iana-bootstrap-init")
+    t.start()
+    return t
+
+
+# 模块导入时立即启动后台加载（兼容 CLI 和 server）
+_init_bootstrap_thread = init_bootstrap_async()
+
+
+def get_bootstrap_status() -> dict:
+    """供 server /api/check 返回诊断信息"""
+    return dict(_bootstrap_init_state)
 
 
 def main():

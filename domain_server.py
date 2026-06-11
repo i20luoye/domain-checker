@@ -255,7 +255,7 @@ class DomainServerHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "status": "healthy",
                 "bootstrap_loaded": len(domain_checker.RDAP_SOURCES),
-                "bootstrap_error": "",
+                "bootstrap_state": domain_checker.get_bootstrap_status(),
                 "dns_prefilter": True,
                 "ts": int(time.time()),
             })
@@ -305,7 +305,7 @@ class DomainServerHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "elapsed_ms": elapsed_ms,
                 "bootstrap_loaded": len(domain_checker.RDAP_SOURCES),
-                "bootstrap_error": "",
+                "bootstrap_state": domain_checker.get_bootstrap_status(),
                 "count": len(results),
                 "results": results,
             })
@@ -323,8 +323,13 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     args = parser.parse_args()
 
+    # 启动时同步等 IANA bootstrap 加载完成（最多 10s），
+    # 确保首次请求就能用到完整 TLD 字典。
+    print("[启动] 正在加载 IANA bootstrap (1200+ TLD)...")
+    domain_checker.init_bootstrap(timeout_sec=10.0)
+
     server = ThreadingHTTPServer((args.host, args.port), DomainServerHandler)
-    print(f"域名查询服务已启动: http://{args.host}:{args.port}/")
+    print(f"域名查询服务已启动: http://{args.host}:{args.port}/  (TLD: {len(domain_checker.RDAP_SOURCES)})")
     print("按 Ctrl+C 停止")
     try:
         server.serve_forever()
