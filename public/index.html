@@ -686,12 +686,14 @@ let alphaFilter = '';
 let searchQuery = '';
 let stats = {available:0,taken:0,error:0,premium:0};
 let batchSize = 10;
+let workBatchSize = 10;
 let concurrent = 3;
 let speedInterval = null;
 let lastChecked = 0;
 let lastSpeedTime = 0;
 let currentPage = 1;
 const PAGE_SIZE = 500;
+const SAFE_API_BATCH_SIZE = 10;
 
 // ── DOM refs ──
 const $ = id => document.getElementById(id);
@@ -868,6 +870,7 @@ async function startCheck(){
   const letters = getAvailableLetters();
   const tlds = getActiveTlds();
   batchSize = Math.max(5,Math.min(500,parseInt($('inputBatchSize').value)||50));
+  workBatchSize = Math.min(batchSize, SAFE_API_BATCH_SIZE);
   concurrent = Math.max(1,Math.min(8,parseInt($('inputConcurrent').value)||3));
 
   if(!tlds.length){alert('请至少选择一个 TLD');return;}
@@ -945,30 +948,13 @@ function finishCheck(){
 // ── Queue Worker ──
 async function processQueue(){
   while(queueIndex < taskQueue.length && running && !paused){
-    const batch = taskQueue.slice(queueIndex, queueIndex + batchSize);
-    queueIndex += batchSize;
+    const batch = taskQueue.slice(queueIndex, queueIndex + workBatchSize);
+    queueIndex += workBatchSize;
 
     try{
-      const response = await fetch('/api/check',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({domains:batch}),
-        signal:controller.signal
-      });
-      if(!response.ok){
-        let msg = `HTTP ${response.status}`;
-        if(response.status === 502) msg = `网关错误 (HTTP 502)`;
-        else if(response.status === 504) msg = `网关超时 (HTTP 504)`;
-        else if(response.status === 503) msg = `服务不可用 (HTTP 503)`;
-        else if(response.status === 500) msg = `服务器内部错误 (HTTP 500)`;
-        else if(response.status === 429) msg = `请求过多/被限流 (HTTP 429)`;
-        throw new Error(msg);
-      }
-      const data = await response.json();
-      if(data.results){
-        for(const result of data.results){
-          handleResult(result);
-        }
+      const results = await sendBatchWithSplitRetry(batch);
+      for(const result of results){
+        handleResult(result);
       }
     }catch(e){
       if(e.name==='AbortError') break;
@@ -979,6 +965,49 @@ async function processQueue(){
         handleResult({domain:d, suffix:tld, status:'error', premium:false, premiumReason:'', method:'fetch_error', detail:e.message});
       }
     }
+  }
+}
+
+function httpErrorMessage(status){
+  if(status === 502) return '网关错误 (HTTP 502)';
+  if(status === 504) return '网关超时 (HTTP 504)';
+  if(status === 503) return '服务不可用 (HTTP 503)';
+  if(status === 500) return '服务器内部错误 (HTTP 500)';
+  if(status === 429) return '请求过多/被限流 (HTTP 429)';
+  return `HTTP ${status}`;
+}
+
+function isGatewayTimeout(error){
+  return error && (error.status === 502 || error.status === 503 || error.status === 504);
+}
+
+async function fetchBatchResults(batch){
+  const response = await fetch('/api/check',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({domains:batch}),
+    signal:controller.signal
+  });
+  if(!response.ok){
+    const error = new Error(httpErrorMessage(response.status));
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  return data.results || [];
+}
+
+async function sendBatchWithSplitRetry(batch){
+  try{
+    return await fetchBatchResults(batch);
+  }catch(error){
+    if(isGatewayTimeout(error) && batch.length > 1){
+      const mid = Math.ceil(batch.length / 2);
+      const leftResults = await sendBatchWithSplitRetry(batch.slice(0, mid));
+      const rightResults = await sendBatchWithSplitRetry(batch.slice(mid));
+      return leftResults.concat(rightResults);
+    }
+    throw error;
   }
 }
 
@@ -1291,19 +1320,16 @@ async function verifyAvailableBeforeExport(rows){
   const verified = [];
   let rejected = 0;
   try{
-    for(let i=0;i<rows.length;i+=batchSize){
-      const batch = rows.slice(i, i + batchSize).map(r=>r.domain);
-      const response = await fetch('/api/check', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({domains: batch})
-      });
-      if(!response.ok){
+    for(let i=0;i<rows.length;i+=SAFE_API_BATCH_SIZE){
+      const batch = rows.slice(i, i + SAFE_API_BATCH_SIZE).map(r=>r.domain);
+      let results = [];
+      try{
+        results = await sendBatchWithSplitRetry(batch);
+      }catch(e){
         rejected += batch.length;
         continue;
       }
-      const data = await response.json();
-      for(const result of (data.results || [])){
+      for(const result of results){
         if(result.status !== 'available') {
           rejected++;
           continue;
